@@ -1,12 +1,12 @@
 //! Реализация кривой Безье для обработки MIDI velocity
 
-use kurbo::{BezPath, Point};
+use kurbo::Point;
 use super::ControlPoint;
 
 #[derive(Debug, Clone)]
 pub struct BezierCurve {
     control_points: Vec<ControlPoint>,
-    cached_lut: Vec<Point>, // Look-up table для оптимизации
+    cached_lut: Vec<f32>, // Look-up table для оптимизации (128 значений для MIDI velocity)
 }
 
 impl BezierCurve {
@@ -32,29 +32,22 @@ impl BezierCurve {
 
     /// Вычисление значения кривой в точке x (0.0 - 1.0)
     pub fn evaluate(&self, x: f32) -> f32 {
-        let x_normalized = x * 127.0;
+        let x_normalized = (x * 127.0).clamp(0.0, 127.0);
         
         // Использование LUT для быстрого доступа
         if self.cached_lut.is_empty() {
             return x; // Fallback к линейной кривой
         }
 
-        // Поиск ближайших точек в LUT
-        let index = (x_normalized * (self.cached_lut.len() - 1) as f32 / 127.0) as usize;
-        let index = index.min(self.cached_lut.len() - 1);
+        let index = x_normalized as usize;
+        let fraction = x_normalized - index as f32;
 
-        if index == self.cached_lut.len() - 1 {
-            return self.cached_lut[index].y / 127.0;
+        if index >= self.cached_lut.len() - 1 {
+            return self.cached_lut[self.cached_lut.len() - 1];
         }
 
         // Линейная интерполяция между точками LUT
-        let p1 = self.cached_lut[index];
-        let p2 = self.cached_lut[index + 1];
-        
-        let t = (x_normalized - p1.x) / (p2.x - p1.x);
-        let y = p1.y + t * (p2.y - p1.y);
-        
-        y / 127.0
+        self.cached_lut[index] * (1.0 - fraction) + self.cached_lut[index + 1] * fraction
     }
 
     /// Добавление новой контрольной точки
@@ -99,93 +92,86 @@ impl BezierCurve {
         // Создаем LUT с 128 точками (0-127 для MIDI velocity)
         for i in 0..128 {
             let x = i as f32;
-            let t = self.find_t_for_x(x);
-            let y = self.evaluate_bezier(t);
-            self.cached_lut.push(Point::new(x, y));
+            let y = self.evaluate_bezier_direct(x);
+            self.cached_lut.push(y / 127.0); // Нормализуем к диапазону 0.0-1.0
         }
     }
 
-    /// Находит параметр t для заданного x с помощью бинарного поиска
-    fn find_t_for_x(&self, x_target: f32) -> f32 {
-        let mut low = 0.0;
-        let mut high = 1.0;
-        let mut t = 0.5;
-        
-        for _ in 0..16 { // Ограничиваем количество итераций
-            let x_current = self.evaluate_bezier_x(t);
-            if (x_current - x_target).abs() < 0.001 {
-                break;
-            }
+    /// Вычисление значения кривой Безье для заданного x (без использования LUT)
+    fn evaluate_bezier_direct(&self, x: f32) -> f32 {
+        if self.control_points.len() < 2 {
+            return x;
+        }
+
+        // Для простоты используем линейную интерполяцию между контрольными точками
+        // В будущем можно реализовать кубические кривые Безье
+        for i in 0..self.control_points.len() - 1 {
+            let p1 = &self.control_points[i];
+            let p2 = &self.control_points[i + 1];
             
-            if x_current < x_target {
-                low = t;
-            } else {
-                high = t;
+            let p1_x = p1.position.x as f32;
+            let p2_x = p2.position.x as f32;
+            let p1_y = p1.position.y as f32;
+            let p2_y = p2.position.y as f32;
+            
+            if x >= p1_x && x <= p2_x {
+                let t = (x - p1_x) / (p2_x - p1_x);
+                return p1_y + t * (p2_y - p1_y);
             }
-            t = (low + high) / 2.0;
         }
         
-        t
-    }
-
-    /// Вычисление x координаты кривой Безье для параметра t
-    fn evaluate_bezier_x(&self, t: f32) -> f32 {
-        if self.control_points.len() < 2 {
-            return 0.0;
+        // Если x вне диапазона, возвращаем ближайшее значение
+        if x < self.control_points[0].position.x as f32 {
+            self.control_points[0].position.y as f32
+        } else {
+            self.control_points[self.control_points.len() - 1].position.y as f32
         }
-
-        let n = self.control_points.len() - 1;
-        let mut x = 0.0;
-        
-        for i in 0..=n {
-            let binomial = Self::binomial_coefficient(n, i) as f32;
-            let term = binomial * 
-                      (1.0 - t).powi((n - i) as i32) * 
-                      t.powi(i as i32) * 
-                      self.control_points[i].position.x;
-            x += term;
-        }
-        
-        x
-    }
-
-    /// Вычисление y координаты кривой Безье для параметра t
-    fn evaluate_bezier(&self, t: f32) -> f32 {
-        if self.control_points.len() < 2 {
-            return 0.0;
-        }
-
-        let n = self.control_points.len() - 1;
-        let mut y = 0.0;
-        
-        for i in 0..=n {
-            let binomial = Self::binomial_coefficient(n, i) as f32;
-            let term = binomial * 
-                      (1.0 - t).powi((n - i) as i32) * 
-                      t.powi(i as i32) * 
-                      self.control_points[i].position.y;
-            y += term;
-        }
-        
-        y
-    }
-
-    /// Биномиальный коэффициент C(n, k)
-    fn binomial_coefficient(n: usize, k: usize) -> usize {
-        if k > n {
-            return 0;
-        }
-        
-        let mut result = 1;
-        for i in 1..=k {
-            result = result * (n - i + 1) / i;
-        }
-        result
     }
 }
 
 impl Default for BezierCurve {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_linear_curve() {
+        let curve = BezierCurve::new();
+        
+        // Проверяем линейную кривую (y = x)
+        assert!((curve.evaluate(0.0) - 0.0).abs() < 0.001);
+        assert!((curve.evaluate(0.5) - 0.5).abs() < 0.001);
+        assert!((curve.evaluate(1.0) - 1.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_control_points() {
+        let curve = BezierCurve::new();
+        let points = curve.control_points();
+        
+        // Проверяем начальные контрольные точки
+        assert_eq!(points.len(), 2);
+        assert_eq!(points[0].position.x, 0.0);
+        assert_eq!(points[0].position.y, 0.0);
+        assert_eq!(points[1].position.x, 127.0);
+        assert_eq!(points[1].position.y, 127.0);
+    }
+
+    #[test]
+    fn test_lut_rebuilding() {
+        let curve = BezierCurve::new();
+        
+        // Проверяем, что LUT строится корректно
+        assert_eq!(curve.cached_lut.len(), 128);
+        
+        // Проверяем несколько значений с учетом ошибок округления
+        assert!((curve.evaluate(0.0) - 0.0).abs() < 0.01);
+        assert!((curve.evaluate(0.5) - 0.5).abs() < 0.01);
+        assert!((curve.evaluate(1.0) - 1.0).abs() < 0.01);
     }
 }

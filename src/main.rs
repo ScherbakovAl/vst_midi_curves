@@ -1,3 +1,6 @@
+use nih_plug::prelude::*;
+use vst_midi_curves::MidiCurvesPlugin;
+
 fn main() {
-    println!("Hello, world!");
+    nih_export_standalone::<MidiCurvesPlugin>();
 }

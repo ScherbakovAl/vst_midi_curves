@@ -1,16 +1,26 @@
 use nih_plug::prelude::*;
 use std::sync::Arc;
 
-struct MidiCurvesPlugin {
+pub mod curve;
+pub mod processor;
+use processor::VelocityCurveProcessor;
+
+pub struct MidiCurvesPlugin {
     params: Arc<MidiCurvesParams>,
+    curve_processor: VelocityCurveProcessor,
 }
 
 #[derive(Params)]
-struct MidiCurvesParams {}
+struct MidiCurvesParams {
+    #[id = "curve_enabled"]
+    pub curve_enabled: BoolParam,
+}
 
 impl Default for MidiCurvesParams {
     fn default() -> Self {
-        Self {}
+        Self {
+            curve_enabled: BoolParam::new("Curve Enabled", true),
+        }
     }
 }
 
@@ -18,6 +28,7 @@ impl Default for MidiCurvesPlugin {
     fn default() -> Self {
         Self {
             params: Arc::new(MidiCurvesParams::default()),
+            curve_processor: VelocityCurveProcessor::new(),
         }
     }
 }
@@ -34,6 +45,10 @@ impl Plugin for MidiCurvesPlugin {
     type BackgroundTask = ();
     type SysExMessage = ();
 
+    fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
+        None
+    }
+
     fn params(&self) -> Arc<dyn Params> {
         self.params.clone()
     }
@@ -47,14 +62,21 @@ impl Plugin for MidiCurvesPlugin {
         while let Some(event) = context.next_event() {
             match event {
                 NoteEvent::NoteOn { timing, voice_id, channel, note, velocity } => {
-                    // Пока просто пропускаем MIDI события без обработки
-                    context.send_event(NoteEvent::NoteOn {
-                        timing,
-                        voice_id,
-                        channel,
-                        note,
-                        velocity,
-                    });
+                    if self.params.curve_enabled.value() {
+                        let processed_velocity = self.curve_processor
+                            .process_velocity((velocity * 127.0) as u8);
+                        
+                        context.send_event(NoteEvent::NoteOn {
+                            timing,
+                            voice_id,
+                            channel,
+                            note,
+                            velocity: processed_velocity as f32 / 127.0,
+                        });
+                    } else {
+                        // Если кривая отключена, просто пропускаем событие
+                        context.send_event(event);
+                    }
                 }
                 _ => context.send_event(event),
             }
