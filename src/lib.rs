@@ -2,12 +2,13 @@ use nih_plug::prelude::*;
 use std::sync::Arc;
 
 pub mod curve;
+pub mod editor;
 pub mod processor;
 use processor::VelocityCurveProcessor;
 
 pub struct MidiCurvesPlugin {
     params: Arc<MidiCurvesParams>,
-    curve_processor: VelocityCurveProcessor,
+    curve_processor: Arc<std::sync::Mutex<VelocityCurveProcessor>>,
 }
 
 #[derive(Params)]
@@ -28,7 +29,7 @@ impl Default for MidiCurvesPlugin {
     fn default() -> Self {
         Self {
             params: Arc::new(MidiCurvesParams::default()),
-            curve_processor: VelocityCurveProcessor::new(),
+            curve_processor: Arc::new(std::sync::Mutex::new(VelocityCurveProcessor::new())),
         }
     }
 }
@@ -46,7 +47,7 @@ impl Plugin for MidiCurvesPlugin {
     type SysExMessage = ();
 
     fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
-        None
+        editor::create_editor(self.curve_processor.clone())
     }
 
     fn params(&self) -> Arc<dyn Params> {
@@ -63,7 +64,7 @@ impl Plugin for MidiCurvesPlugin {
             match event {
                 NoteEvent::NoteOn { timing, voice_id, channel, note, velocity } => {
                     if self.params.curve_enabled.value() {
-                        let processed_velocity = self.curve_processor
+                        let processed_velocity = self.curve_processor.lock().unwrap()
                             .process_velocity((velocity * 127.0) as u8);
                         
                         context.send_event(NoteEvent::NoteOn {
