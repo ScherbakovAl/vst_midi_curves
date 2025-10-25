@@ -1,5 +1,4 @@
-//! GUI редактор для плагина MIDI Curves
-
+//! GUI редактор для плагина MIDI Curves 
 use nih_plug::prelude::*;
 use nih_plug_egui::{create_egui_editor, egui, EguiState};
 use std::sync::Arc;
@@ -28,7 +27,7 @@ pub fn create_editor(
                 
                 // Создаем интерактивный canvas
                 let mut curve_canvas = CurveCanvas::new(curve);
-                let response = curve_canvas.ui(ui);
+                let _response = curve_canvas.ui(ui);
                 
                 // Если кривая изменилась в canvas, обновляем ее в процессоре
                 if curve_canvas.curve_changed() {
@@ -145,6 +144,47 @@ impl CurveCanvas {
             } else {
                 (egui::Color32::from_rgb(255, 100, 100), egui::Color32::from_rgb(255, 150, 150)) // Обычная точка
             };
+            
+            // Отрисовка касательных линий для выбранной точки
+            if Some(i) == self.interaction_handler.selected_point() {
+                // Входящая касательная
+                let handle_in_screen = self.world_to_screen(
+                    kurbo::Point::new(
+                        point.position.x + point.handle_in.x,
+                        point.position.y + point.handle_in.y,
+                    ),
+                    rect,
+                );
+                painter.line_segment(
+                    [screen_pos, handle_in_screen],
+                    egui::Stroke::new(1.0, egui::Color32::from_rgb(100, 200, 100)),
+                );
+                
+                // Исходящая касательная
+                let handle_out_screen = self.world_to_screen(
+                    kurbo::Point::new(
+                        point.position.x + point.handle_out.x,
+                        point.position.y + point.handle_out.y,
+                    ),
+                    rect,
+                );
+                painter.line_segment(
+                    [screen_pos, handle_out_screen],
+                    egui::Stroke::new(1.0, egui::Color32::from_rgb(100, 100, 200)),
+                );
+                
+                // Отрисовка точек касательных
+                painter.circle_filled(
+                    handle_in_screen,
+                    4.0,
+                    egui::Color32::from_rgb(100, 200, 100),
+                );
+                painter.circle_filled(
+                    handle_out_screen,
+                    4.0,
+                    egui::Color32::from_rgb(100, 100, 200),
+                );
+            }
             
             // Внешний круг
             painter.circle_filled(

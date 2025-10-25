@@ -57,7 +57,7 @@ impl InteractionHandler {
         // Получаем позицию курсора в координатах экрана
         if let Some(hover_pos) = response.hover_pos() {
             // Проверяем наведение на точки
-            self.hovered_point = self.find_point_at(hover_pos, curve, rect) {
+            self.hovered_point = self.find_point_at(hover_pos, curve, rect);
         } else {
             self.hovered_point = None;
         }
@@ -70,7 +70,6 @@ impl InteractionHandler {
                 // Начинаем перетаскивание если кликнули на точку
                 if self.selected_point.is_some() {
                     self.drag_state.is_dragging = true;
-                    self.drag_state.drag_start = hover_pos;
                     self.drag_state.dragged_point_index = self.selected_point;
                 }
             }
@@ -88,7 +87,7 @@ impl InteractionHandler {
         }
 
         // Завершение перетаскивания
-        if response.drag_released() {
+        if response.drag_stopped() {
             self.drag_state.is_dragging = false;
             self.drag_state.dragged_point_index = None;
         }
@@ -98,7 +97,7 @@ impl InteractionHandler {
             if let Some(hover_pos) = response.hover_pos() {
                 let world_pos = self.screen_to_world(hover_pos, rect);
                 curve.add_control_point(world_pos);
-                self.selected_point = Some(curve.control_points().len() - 2); // Выбираем новую точку (не последнюю)
+                self.selected_point = Some(curve.control_points().len() - 1); // Выбираем новую точку
                 changed = true;
             }
         }

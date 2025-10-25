@@ -2,6 +2,7 @@
 
 use kurbo::Point;
 use super::ControlPoint;
+use super::interpolation::cubic_bezier;
 
 #[derive(Debug, Clone)]
 pub struct BezierCurve {
@@ -103,20 +104,31 @@ impl BezierCurve {
             return x;
         }
 
-        // Для простоты используем линейную интерполяцию между контрольными точками
-        // В будущем можно реализовать кубические кривые Безье
+        // Используем кубические кривые Безье между контрольными точками
         for i in 0..self.control_points.len() - 1 {
-            let p1 = &self.control_points[i];
-            let p2 = &self.control_points[i + 1];
+            let p0 = &self.control_points[i];
+            let p3 = &self.control_points[i + 1];
             
-            let p1_x = p1.position.x as f32;
-            let p2_x = p2.position.x as f32;
-            let p1_y = p1.position.y as f32;
-            let p2_y = p2.position.y as f32;
+            let p0_x = p0.position.x as f32;
+            let p3_x = p3.position.x as f32;
             
-            if x >= p1_x && x <= p2_x {
-                let t = (x - p1_x) / (p2_x - p1_x);
-                return p1_y + t * (p2_y - p1_y);
+            if x >= p0_x && x <= p3_x {
+                // Вычисляем параметр t для текущего сегмента
+                let t = (x - p0_x) / (p3_x - p0_x);
+                
+                // Используем касательные для создания кубической кривой
+                let p0_y = p0.position.y as f32;
+                let p3_y = p3.position.y as f32;
+                
+                // Используем касательные точки для создания кривой Безье
+                let _p1_x = p0_x + p0.handle_out.x as f32;
+                let p1_y = p0_y + p0.handle_out.y as f32;
+                let _p2_x = p3_x + p3.handle_in.x as f32;
+                let p2_y = p3_y + p3.handle_in.y as f32;
+                
+                // Вычисляем координаты x и y по кубической кривой Безье
+                let y = cubic_bezier(t, p0_y, p1_y, p2_y, p3_y);
+                return y;
             }
         }
         
