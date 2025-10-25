@@ -4,15 +4,35 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+# VST плагин зависимости
 nih_plug = { git = "https://github.com/robbert-vdh/nih-plug", features = ["vst3", "standalone"] }
 nih_plug_egui = { git = "https://github.com/robbert-vdh/nih-plug" }
+
+# GUI зависимости для standalone
+eframe = { version = "0.28", default-features = false, features = ["glow"] }
 egui = "0.28"
+
+# Общие зависимости
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 kurbo = "0.11"
 
+# MIDI зависимости (для будущих версий)
+cpal = "0.15"  # Для аудио/MIDI IO
+midir = "0.8"  # Для MIDI портов
+
+# Дополнительные зависимости
+dirs = "5.0"   # Для работы с директориями конфигурации
+
+[dev-dependencies]
+tempfile = "3.0"   # Для временных файлов в тестах
+
 [lib]
 crate-type = ["cdylib", "lib"]
+
+[[bin]]
+name = "midi_curves"
+path = "src/main.rs"
 
 [profile.release]
 lto = "fat"

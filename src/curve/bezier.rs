@@ -8,7 +8,7 @@ pub struct BezierCurve {
     /// Кэшированная таблица значений для быстрого доступа (LUT)
     cached_lut: Vec<(f32, f32)>,
     /// Флаг, указывающий нужно ли обновить кэш
-    dirty: bool,
+    pub dirty: bool,
 }
 
 impl BezierCurve {

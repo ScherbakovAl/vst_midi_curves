@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 // Подключаем модули для работы с кривыми
 pub mod curve;
+pub mod presets;
 
 use curve::BezierCurve;
 
