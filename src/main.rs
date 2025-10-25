@@ -185,81 +185,145 @@ impl eframe::App for MidiCurvesApp {
             self.draw_main_ui(ui);
         });
         
-        // Перерисовка при изменении состояния
-        ctx.request_repaint();
+        // Обычная перерисовка при необходимости (убираем принудительное)
+        // ctx.request_repaint();
     }
 }
 
 impl MidiCurvesApp {
     fn draw_main_ui(&mut self, ui: &mut egui::Ui) {
-        // Заголовок
-        ui.horizontal_top(|ui| {
-            ui.heading("🎹 MIDI Curves - Standalone");
-            ui.separator();
-            ui.label("Редактор кривых для обработки MIDI velocity");
+        // Верхняя панель с названием и кнопками
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new("🎵 VST MIDI Curves Plugin").size(18.0));
+            ui.add_space(20.0);
+            if ui.button("🔄 Сбросить кривую").clicked() {
+                self.reset_curve();
+            }
+            if ui.button("🎯 Тест кривой").clicked() {
+                self.test_curve();
+            }
+            if ui.button("📁 Пресеты").clicked() {
+                // Переключение на панель пресетов
+            }
+            if ui.button("🎹 MIDI").clicked() {
+                // Переключение на панель MIDI
+            }
         });
         
-        ui.separator();
+        ui.add_space(10.0);
         
-        // Основная область с кривой и контролами
         ui.horizontal(|ui| {
-            // Левая панель - Кривая и тестирование
-            ui.vertical(|ui| {
+            // Левая панель - основной редактор кривой
+            ui.group(|ui| {
+                ui.set_min_width(650.0);
+                ui.set_min_height(500.0);
                 self.draw_curve_editor(ui);
-                self.draw_test_panel(ui);
             });
-            
-            ui.add_space(20.0);
-            
-            // Правая панель - Пресеты и настройки
+
+            // Правая панель - дополнительные элементы
             ui.vertical(|ui| {
-                self.draw_presets_panel(ui);
-                self.draw_midi_panel(ui);
+                ui.set_min_width(300.0);
+                ui.set_min_height(500.0);
+                
+                // Панель тестирования
+                egui::Frame::group(ui.style())
+                    .fill(egui::Color32::from_gray(30))
+                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(60)))
+                    .show(ui, |ui| {
+                        ui.label(egui::RichText::new("🎯 Тест кривой").size(14.0));
+                        ui.add_space(5.0);
+                        self.draw_test_panel(ui);
+                    });
+                
+                ui.add_space(10.0);
+                
+                // Панель пресетов
+                egui::Frame::group(ui.style())
+                    .fill(egui::Color32::from_gray(30))
+                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(60)))
+                    .show(ui, |ui| {
+                        ui.label(egui::RichText::new("📁 Пресеты").size(14.0));
+                        ui.add_space(5.0);
+                        self.draw_presets_panel(ui);
+                    });
+                
+                ui.add_space(10.0);
+                
+                // Панель MIDI (заглушка)
+                egui::Frame::group(ui.style())
+                    .fill(egui::Color32::from_gray(30))
+                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(60)))
+                    .show(ui, |ui| {
+                        ui.label(egui::RichText::new("🎹 MIDI").size(14.0));
+                        ui.add_space(5.0);
+                        self.draw_midi_panel(ui);
+                    });
             });
         });
     }
     
     fn draw_curve_editor(&mut self, ui: &mut egui::Ui) {
-        ui.group(|ui| {
-            ui.label("🎯 Редактор кривой");
-            
-            // Область для отрисовки кривой
-            let (response, painter) = ui.allocate_painter(
-                egui::vec2(600.0, 400.0),
-                Sense::click_and_drag(),
-            );
-            
-            // Обработка взаимодействия с кривой
-            self.handle_curve_interaction(&response);
-            
-            // Отрисовка кривой
-            self.draw_curve(&painter, response.rect);
-            
-            // Информация о выбранной точке
-            if let Some(index) = self.selected_point {
-                let curve = self.curve.lock().unwrap();
-                if let Some(point) = curve.control_points.get(index) {
-                    ui.label(format!("Точка {}: ({:.1}, {:.1})", index, point.position.0, point.position.1));
+        ui.label(egui::RichText::new("🎯 Редактор кривой Безье").size(16.0));
+        ui.add_space(10.0);
+        
+        // Область для отрисовки кривой
+        let (response, painter) = ui.allocate_painter(
+            egui::vec2(600.0, 400.0),
+            Sense::click_and_drag(),
+        );
+        
+        // Отрисовка области для кривой
+        
+        // Обработка взаимодействия с кривой
+        self.handle_curve_interaction(&response);
+        
+        // Отрисовка кривой
+        self.draw_curve(&painter, response.rect);
+        
+        ui.add_space(10.0);
+        
+        // Информация о выбранной точке
+        if let Some(index) = self.selected_point {
+            let curve = self.curve.lock().unwrap();
+            if let Some(point) = curve.control_points.get(index) {
+                ui.label(format!("🎯 Выбрана точка {}: ({:.1}, {:.1})", index, point.position.0, point.position.1));
+            }
+        } else {
+            ui.label("🎯 Точка не выбрана - кликните по кривой для выбора");
+        }
+        
+        ui.add_space(5.0);
+        
+        // Кнопки управления точками
+        ui.horizontal(|ui| {
+            if ui.button("➕ Добавить точку").clicked() {
+                if let Some(hover_pos) = response.hover_pos() {
+                    self.add_control_point(hover_pos, response.rect);
                 }
             }
             
-            // Кнопки управления точками
-            ui.horizontal(|ui| {
-                if ui.button("➕ Добавить точку").clicked() {
-                    if let Some(hover_pos) = response.hover_pos() {
-                        self.add_control_point(hover_pos, response.rect);
-                    }
-                }
-                
-                if ui.button("❌ Удалить точку").clicked() {
-                    self.remove_selected_point();
-                }
-                
-                if ui.button("🔄 Сброс").clicked() {
-                    self.reset_curve();
-                }
-            });
+            if ui.button("❌ Удалить точку").clicked() {
+                self.remove_selected_point();
+            }
+            
+            if ui.button("🔄 Сброс к линейной").clicked() {
+                self.reset_curve();
+            }
         });
+        
+        ui.add_space(5.0);
+        
+        // Информация о текущих точках
+        let curve = self.curve.lock().unwrap();
+        ui.label(format!("📊 Всего точек: {}", curve.control_points.len()));
+        
+        if !curve.control_points.is_empty() {
+            ui.label("📋 Список точек:");
+            for (i, point) in curve.control_points.iter().enumerate() {
+                let marker = if Some(i) == self.selected_point { "▶ " } else { "• " };
+                ui.label(format!("{}Точка {}: ({:.1}, {:.1})", marker, i, point.position.0, point.position.1));
+            }
+        }
     }
     
     fn draw_test_panel(&mut self, ui: &mut egui::Ui) {
@@ -425,15 +489,12 @@ impl MidiCurvesApp {
         }
     }
     
-    fn draw_curve(&self, painter: &Painter, rect: Rect) {
+    fn draw_curve(&mut self, painter: &Painter, rect: Rect) {
         // Отрисовка сетки
         self.draw_grid(painter, rect);
         
-        // Отрисовка кривой
+        // Отрисовка кривой Безье с контрольными точками
         self.draw_bezier_curve(painter, rect);
-        
-        // Отрисовка контрольных точек
-        self.draw_control_points(painter, rect);
     }
     
     fn draw_grid(&self, painter: &Painter, rect: Rect) {
@@ -469,31 +530,60 @@ impl MidiCurvesApp {
         );
     }
     
-    fn draw_bezier_curve(&self, painter: &Painter, rect: Rect) {
-        let curve = self.curve.lock().unwrap();
+    fn draw_bezier_curve(&mut self, painter: &Painter, rect: Rect) {
+        let mut curve = self.curve.lock().unwrap();
         
         if curve.control_points.len() < 2 {
             return;
         }
         
-        let mut points = Vec::new();
+        // Строим точки для кривой через интерполяцию
+        let mut curve_points = Vec::new();
         
-        // Используем кэшированные значения кривой для отрисовки
-        let cached_values = curve.get_cached_values();
-        
-        for (x, y) in cached_values {
-            let x_norm = *x / 127.0;
-            let screen_x = rect.left() + x_norm * rect.width();
-            let screen_y = rect.bottom() - (y / 127.0) * rect.height();
+        // Генерируем точки кривой от 0 до 127 (MIDI velocity range)
+        for i in 0..=128 {
+            let x_input = i as f32;
+            let y_output = curve.evaluate(x_input);
             
-            points.push(Pos2::new(screen_x, screen_y));
+            // Конвертируем в экранные координаты
+            let screen_x = rect.left() + (x_input / 127.0) * rect.width();
+            let screen_y = rect.bottom() - (y_output / 127.0) * rect.height();
+            
+            curve_points.push(Pos2::new(screen_x, screen_y));
         }
         
-        // Отрисовка кривой
-        painter.add(Shape::line(
-            points,
-            Stroke::new(3.0, Color32::from_rgb(100, 200, 255)),
-        ));
+        // Отрисовка кривой как плавная линия
+        if curve_points.len() >= 2 {
+            painter.add(egui::Shape::line(
+                curve_points.clone(),
+                egui::Stroke::new(3.0, egui::Color32::from_rgb(100, 200, 255)) // Голубая линия
+            ));
+        }
+        
+        // Рисуем контрольные точки как управляющие элементы
+        for (i, point) in curve.control_points.iter().enumerate() {
+            let screen_pos = self.world_to_screen(Pos2::new(point.position.0, point.position.1), rect);
+            
+            // Цвет точки зависит от выбранности
+            let color = if Some(i) == self.selected_point {
+                egui::Color32::from_rgb(255, 100, 100) // Красный для выбранной
+            } else {
+                egui::Color32::from_rgb(255, 150, 150) // Розовый для обычной
+            };
+            
+            // Рисуем точку
+            painter.circle_filled(screen_pos, 6.0, color);
+            painter.circle_stroke(screen_pos, 6.0, egui::Stroke::new(1.0, egui::Color32::BLACK));
+            
+            // Номер точки
+            painter.text(
+                screen_pos + egui::vec2(8.0, -8.0),
+                egui::Align2::LEFT_TOP,
+                i.to_string(),
+                egui::FontId::default(),
+                egui::Color32::WHITE,
+            );
+        }
     }
     
     fn draw_control_points(&self, painter: &Painter, rect: Rect) {
@@ -528,21 +618,21 @@ impl MidiCurvesApp {
 fn main() -> Result<(), eframe::Error> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1200.0, 800.0]),
+            .with_inner_size([800.0, 600.0])
+            .with_title("VST MIDI Curves Plugin - Beta")
+            .with_resizable(true)
+            .with_fullscreen(false)
+            .with_decorations(true),
         ..Default::default()
     };
     
-    // Инициализация приложения с обработкой ошибок
-    let app_result = MidiCurvesApp::new();
-    if let Err(e) = app_result {
-        eprintln!("Ошибка инициализации: {}", e);
-        return Ok(());
-    }
-    let app = app_result.unwrap();
+    let app = MidiCurvesApp::new().unwrap();
     
     eframe::run_native(
-        "MIDI Curves - Standalone",
+        "VST MIDI Curves Plugin",
         options,
-        Box::new(|_cc| Ok(Box::new(app))),
+        Box::new(move |_cc| {
+            Ok(Box::new(app))
+        }),
     )
 }

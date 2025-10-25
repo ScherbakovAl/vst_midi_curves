@@ -36,10 +36,10 @@ impl BezierCurve {
     }
 
     /// Вычисляет значение кривой в точке x
-    /// 
+    ///
     /// # Параметры:
     /// - x: входное значение от 0.0 до 127.0
-    /// 
+    ///
     /// # Возвращает:
     /// Выходное значение от 0.0 до 127.0
     pub fn evaluate(&mut self, x: f32) -> f32 {
@@ -62,7 +62,6 @@ impl BezierCurve {
             return x;
         }
         
-        let normalized_x = x / 127.0;
         let mut y_value = 0.0;
         
         if self.control_points.len() == 2 {
@@ -72,42 +71,51 @@ impl BezierCurve {
             let ratio = if x2 != x1 { (x - x1) / (x2 - x1) } else { 0.0 };
             y_value = y1 + (y2 - y1) * ratio;
         } else {
-            // Используем первые 4 точки для кубической кривой
-            let p0 = self.control_points[0].position;
-            let p1 = self.control_points.get(1).unwrap_or(&self.control_points[0]).position;
-            let p2 = self.control_points.get(2).unwrap_or(&self.control_points[1]).position;
-            let p3 = self.control_points.get(3).unwrap_or(&self.control_points[2]).position;
+            // Подготавливаем точки для расчета
+            let mut points: Vec<(f32, f32)> = Vec::new();
+            for point in &self.control_points {
+                points.push(point.position);
+            }
+            
+            // Добавляем фиктивные точки если нужно
+            while points.len() < 4 {
+                points.push(points.last().copied().unwrap_or((127.0, 127.0)));
+            }
             
             // Находим t для заданного x
-            let t = self.find_t_for_x(x, &p0, &p1, &p2, &p3);
+            let t = self.find_t_for_x(x, &points);
             
-            // Вычисляем y
-            y_value = cubic_bezier(t, p0.1, p1.1, p2.1, p3.1);
+            // Вычисляем Y координату используя правильный X для расчета t
+            let y = cubic_bezier(t, points[0].1, points[1].1, points[2].1, points[3].1);
+            y_value = y;
         }
         
         y_value.clamp(0.0, 127.0)
     }
 
-    /// Находит параметр t для заданного x методом Ньютона-Рафсона
-    fn find_t_for_x(&self, target_x: f32, p0: &(f32, f32), p1: &(f32, f32), p2: &(f32, f32), p3: &(f32, f32)) -> f32 {
-        let mut t = 0.5; // Начальное приближение
+    /// Находит параметр t для заданного x методом бинарного поиска
+    fn find_t_for_x(&self, target_x: f32, points: &[(f32, f32)]) -> f32 {
+        let mut low = 0.0;
+        let mut high = 1.0;
         
-        for _ in 0..5 { // 5 итераций для точности
-            let x_t = cubic_bezier(t, p0.0, p1.0, p2.0, p3.0);
-            let dx_dt = cubic_bezier_derivative(t, p0.0, p1.0, p2.0, p3.0);
+        for _ in 0..20 { // 20 итераций для точности
+            let mid = (low + high) / 2.0;
             
-            if dx_dt.abs() < 0.001 {
-                break; // Избегаем деления на ноль
+            // Вычисляем X координату в точке mid
+            let x_mid = cubic_bezier(mid, points[0].0, points[1].0, points[2].0, points[3].0);
+            
+            if (x_mid - target_x).abs() < 0.001 {
+                return mid;
             }
             
-            let error = x_t - target_x;
-            t -= error / dx_dt;
-            
-            // Ограничиваем t диапазоном [0, 1]
-            t = t.clamp(0.0, 1.0);
+            if x_mid < target_x {
+                low = mid;
+            } else {
+                high = mid;
+            }
         }
         
-        t
+        (low + high) / 2.0
     }
 
     /// Добавляет новую контрольную точку
@@ -177,8 +185,10 @@ impl BezierCurve {
         }
     }
 
-    /// Возвращает ссылку на кэшированные значения
-    pub fn get_cached_values(&self) -> &[(f32, f32)] {
+    /// Возвращает кэшированные значения (обновляет кэш при необходимости)
+    pub fn get_cached_values(&mut self) -> &[(f32, f32)] {
+        // Принудительно обновляем кэш при каждом запросе для отрисовки
+        self.ensure_cache_updated();
         &self.cached_lut
     }
 }
@@ -188,14 +198,6 @@ impl Default for BezierCurve {
         Self::new()
     }
 }
-
-/// Производная от кубической кривой Безье (для метода Ньютона-Рафсона)
-fn cubic_bezier_derivative(t: f32, p0: f32, p1: f32, p2: f32, p3: f32) -> f32 {
-    let mt = 1.0 - t;
-    3.0 * mt * mt * (p1 - p0) + 6.0 * mt * t * (p2 - p1) + 3.0 * t * t * (p3 - p2)
-}
-
-#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -256,5 +258,19 @@ mod tests {
         curve.reset_to_linear();
         assert_eq!(curve.evaluate(64.0), 64.0);
         assert_eq!(curve.control_points.len(), 2);
+    }
+    
+    #[test]
+    fn test_cached_values() {
+        let mut curve = BezierCurve::new();
+        
+        // Проверяем что кэш не пустой
+        let cached = curve.get_cached_values();
+        assert!(!cached.is_empty());
+        assert_eq!(cached.len(), 128); // 0..=127
+        
+        // Проверяем что кэш содержит правильные значения
+        assert_eq!(cached[0], (0.0, 0.0));
+        assert_eq!(cached[127], (127.0, 127.0));
     }
 }
