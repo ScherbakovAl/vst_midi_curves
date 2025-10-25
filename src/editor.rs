@@ -5,6 +5,7 @@ use nih_plug_egui::{create_egui_editor, egui, EguiState};
 use std::sync::Arc;
 
 use crate::curve::BezierCurve;
+use crate::gui::InteractionHandler;
 use crate::processor::VelocityCurveProcessor;
 
 /// Создание GUI редактора
@@ -21,24 +22,37 @@ pub fn create_editor(
                 
                 ui.add_space(10.0);
                 
-                // Клонируем кривую, чтобы не держать lock
-                let curve = state.lock().unwrap().curve().clone();
+                // Забираем lock на процессор для чтения и записи
+                let mut curve_processor_guard = state.lock().unwrap();
+                let curve = curve_processor_guard.curve().clone();
                 
-                let mut curve_canvas = CurveCanvas::new(&curve);
-                curve_canvas.ui(ui);
+                // Создаем интерактивный canvas
+                let mut curve_canvas = CurveCanvas::new(curve);
+                let response = curve_canvas.ui(ui);
+                
+                // Если кривая изменилась в canvas, обновляем ее в процессоре
+                if curve_canvas.curve_changed() {
+                    curve_processor_guard.set_curve(curve_canvas.curve().clone());
+                }
             });
         },
     )
 }
 
-/// Canvas для отрисовки графика кривой
-struct CurveCanvas<'a> {
-    curve: &'a BezierCurve,
+/// Canvas для отрисовки и редактирования графика кривой
+struct CurveCanvas {
+    curve: BezierCurve,
+    interaction_handler: InteractionHandler,
+    curve_modified: bool,
 }
 
-impl<'a> CurveCanvas<'a> {
-    fn new(curve: &'a BezierCurve) -> Self {
-        Self { curve }
+impl CurveCanvas {
+    fn new(curve: BezierCurve) -> Self {
+        Self {
+            curve,
+            interaction_handler: InteractionHandler::new(),
+            curve_modified: false,
+        }
     }
 
     fn ui(&mut self, ui: &mut egui::Ui) -> egui::Response {
@@ -46,6 +60,17 @@ impl<'a> CurveCanvas<'a> {
             egui::Vec2::new(600.0, 400.0),
             egui::Sense::click_and_drag(),
         );
+
+        // Обработка взаимодействий
+        let curve_changed = self.interaction_handler.handle_input(
+            &response,
+            &mut self.curve,
+            response.rect,
+        );
+            
+        if curve_changed {
+            self.curve_modified = true;
+        }
 
         // Отрисовка фона
         painter.rect_filled(
@@ -60,7 +85,7 @@ impl<'a> CurveCanvas<'a> {
         // Отрисовка кривой
         self.draw_curve(&painter, response.rect);
         
-        // Отрисовка контрольных точек
+        // Отрисовка контрольных точек с учетом выбора и наведения
         self.draw_control_points(&painter, response.rect);
 
         response
@@ -109,21 +134,30 @@ impl<'a> CurveCanvas<'a> {
 
     fn draw_control_points(&self, painter: &egui::Painter, rect: egui::Rect) {
         // Отрисовка управляющих точек
-        for point in self.curve.control_points() {
+        for (i, point) in self.curve.control_points().iter().enumerate() {
             let screen_pos = self.world_to_screen(point.position, rect);
+            
+            // Определяем цвет точки в зависимости от состояния
+            let (outer_color, inner_color) = if Some(i) == self.interaction_handler.selected_point() {
+                (egui::Color32::from_rgb(255, 255, 100), egui::Color32::from_rgb(255, 200, 50)) // Выбранная точка
+            } else if Some(i) == self.interaction_handler.hovered_point() {
+                (egui::Color32::from_rgb(255, 150, 100), egui::Color32::from_rgb(255, 100, 50)) // Точка под курсором
+            } else {
+                (egui::Color32::from_rgb(255, 100, 100), egui::Color32::from_rgb(255, 150, 150)) // Обычная точка
+            };
             
             // Внешний круг
             painter.circle_filled(
                 screen_pos,
                 10.0,
-                egui::Color32::from_rgb(255, 100, 100),
+                outer_color,
             );
             
             // Внутренний круг
             painter.circle_filled(
                 screen_pos,
                 6.0,
-                egui::Color32::from_rgb(255, 150, 150),
+                inner_color,
             );
         }
     }
@@ -135,11 +169,20 @@ impl<'a> CurveCanvas<'a> {
         )
     }
 
-    #[allow(dead_code)]
     fn screen_to_world(&self, screen_pos: egui::Pos2, rect: egui::Rect) -> kurbo::Point {
         kurbo::Point::new(
             ((screen_pos.x - rect.left()) / rect.width() * 127.0) as f64,
             ((rect.bottom() - screen_pos.y) / rect.height() * 127.0) as f64,
         )
+    }
+
+    /// Возвращает ссылку на кривую
+    pub fn curve(&self) -> &BezierCurve {
+        &self.curve
+    }
+
+    /// Проверяет, была ли кривая изменена
+    pub fn curve_changed(&self) -> bool {
+        self.curve_modified
     }
 }

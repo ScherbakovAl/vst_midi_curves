@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 pub mod curve;
 pub mod editor;
+pub mod gui;
 pub mod processor;
 use processor::VelocityCurveProcessor;
 
