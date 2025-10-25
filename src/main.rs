@@ -123,14 +123,11 @@ impl MidiCurvesApp {
     
     // Обновление списка MIDI портов
     fn refresh_midi_ports(&mut self) {
-        // Используем простой MIDI менеджер для тестирования
-        let simple_midi_manager = self.simple_midi_manager.lock().unwrap();
-        self.midi_input_ports = simple_midi_manager.get_input_ports();
-        self.midi_output_ports = simple_midi_manager.get_output_ports();
-        
-        // Получаем статистику из полного MIDI менеджера
-        let full_midi_manager = self.midi_manager.lock().unwrap();
-        self.midi_stats = full_midi_manager.get_stats();
+        // Используем полный MIDI менеджер
+        let midi_manager = self.midi_manager.lock().unwrap();
+        self.midi_input_ports = midi_manager.get_input_ports();
+        self.midi_output_ports = midi_manager.get_output_ports();
+        self.midi_stats = midi_manager.get_stats();
         
         println!("🔍 Обновлен список MIDI портов: {} входных, {} выходных",
                  self.midi_input_ports.len(), self.midi_output_ports.len());
@@ -199,6 +196,58 @@ impl MidiCurvesApp {
     fn test_midi_processing(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let mut simple_midi_manager = self.simple_midi_manager.lock().unwrap();
         simple_midi_manager.generate_test_event()?;
+        Ok(())
+    }
+    
+    // Отправка тестового MIDI сообщения на подключенный выходной порт
+    fn send_test_midi_message(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        // Создаем тестовое MIDI NoteOn событие
+        let test_event = SimpleMidiEvent::NoteOn {
+            channel: 0,
+            note: 60, // Middle C
+            velocity: 64, // Средняя громкость
+        };
+        
+        println!("🎵 Генерация тестового MIDI события: {:?}", test_event);
+        
+        // Применяем velocity кривую к событию
+        let processed_event = {
+            let mut simple_midi_manager = self.simple_midi_manager.lock().unwrap();
+            simple_midi_manager.process_midi_event(&test_event)
+        };
+        
+        if let Some(processed_event) = processed_event {
+            println!("✅ Событие обработано: {:?}", processed_event);
+            
+            // Конвертируем в MIDI данные для отправки
+            let midi_data = match processed_event {
+                SimpleMidiEvent::NoteOn { channel, note, velocity } => {
+                    vec![0x90 | (channel & 0x0F), note, velocity]
+                }
+                SimpleMidiEvent::NoteOff { channel, note, velocity } => {
+                    vec![0x80 | (channel & 0x0F), note, velocity]
+                }
+                SimpleMidiEvent::ControlChange { channel, controller, value } => {
+                    vec![0xB0 | (channel & 0x0F), controller, value]
+                }
+                SimpleMidiEvent::Other => {
+                    return Err("Неподдерживаемый тип MIDI события".into());
+                }
+            };
+            
+            // Отправляем через полный MIDI менеджер на выходной порт
+            let mut midi_manager = self.midi_manager.lock().unwrap();
+            midi_manager.send_midi_data(&midi_data)?;
+            
+            // Также отправляем соответствующее NoteOff через некоторое время
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            
+            let note_off_data = vec![0x80 | (test_event.get_channel() & 0x0F), test_event.get_note(), 64];
+            let _ = midi_manager.send_midi_data(&note_off_data);
+            
+            println!("✅ NoteOff сообщение отправлено");
+        }
+        
         Ok(())
     }
     
@@ -534,7 +583,7 @@ impl MidiCurvesApp {
             }
             
             if ui.button("🎵 Тест").clicked() {
-                if let Err(e) = self.test_midi_processing() {
+                if let Err(e) = self.send_test_midi_message() {
                     eprintln!("Ошибка MIDI теста: {}", e);
                 }
             }

@@ -303,6 +303,32 @@ impl MidiManager {
         self.stats.lock().unwrap().clone()
     }
     
+    /// Отправка MIDI данных на подключенные выходные порты
+    pub fn send_midi_data(&mut self, data: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
+        let mut port_manager = self.port_manager.lock().unwrap();
+        
+        let mut sent = false;
+        for (port_id, port) in &mut port_manager.output_ports {
+            if port.is_connected() {
+                match port.send_midi(data) {
+                    Ok(_) => {
+                        println!("✅ MIDI сообщение отправлено на порт: {}", port_id);
+                        sent = true;
+                    }
+                    Err(e) => {
+                        eprintln!("❌ Ошибка отправки на порт {}: {}", port_id, e);
+                    }
+                }
+            }
+        }
+        
+        if !sent {
+            return Err("Нет подключенных выходных MIDI портов".into());
+        }
+        
+        Ok(())
+    }
+    
     /// Проверка состояния MIDI менеджера
     pub fn is_active(&self) -> bool {
         self.is_running && (self.input_enabled || self.output_enabled)

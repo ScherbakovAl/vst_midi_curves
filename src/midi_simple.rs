@@ -14,6 +14,28 @@ pub enum SimpleMidiEvent {
     Other,
 }
 
+impl SimpleMidiEvent {
+    /// Получение канала из события
+    pub fn get_channel(&self) -> u8 {
+        match self {
+            SimpleMidiEvent::NoteOn { channel, .. } => *channel,
+            SimpleMidiEvent::NoteOff { channel, .. } => *channel,
+            SimpleMidiEvent::ControlChange { channel, .. } => *channel,
+            SimpleMidiEvent::Other => 0,
+        }
+    }
+    
+    /// Получение ноты из события
+    pub fn get_note(&self) -> u8 {
+        match self {
+            SimpleMidiEvent::NoteOn { note, .. } => *note,
+            SimpleMidiEvent::NoteOff { note, .. } => *note,
+            SimpleMidiEvent::ControlChange { controller, .. } => *controller,
+            SimpleMidiEvent::Other => 60, // Middle C по умолчанию
+        }
+    }
+}
+
 // Простая статистика MIDI
 #[derive(Debug, Clone, Default)]
 pub struct SimpleMidiStats {
