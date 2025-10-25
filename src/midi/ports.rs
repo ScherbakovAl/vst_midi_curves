@@ -131,11 +131,13 @@ impl MidiInputPort {
         let connection = midi_input.connect(
             &port,
             "midi-curves-input",
-            move |_timestamp, data, _| {
-                // В реальной реализации здесь был бы callback, но пока оставим простой вывод
-                if !data.is_empty() {
-                    println!("🎹 MIDI данные получены: {:?}", data);
-                }
+            move |timestamp, data, callback_user_data| {
+                println!("📥 CALLBACK ВЫЗВАН В PORTS.RS с timestamp: {}, data: {:?}", timestamp, data);
+                
+                println!("📞 Вызываем пользовательский callback...");
+                let mut callback = callback_user_data.lock().unwrap();
+                callback(data, timestamp);
+                println!("✅ Пользовательский callback выполнен");
             },
             callback,
         )?;

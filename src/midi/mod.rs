@@ -194,27 +194,78 @@ impl MidiManager {
         let stats = Arc::clone(&self.stats);
         let output_callback = self.output_callback.clone();
         
+        let port_manager_for_callback = Arc::clone(&self.port_manager);
+        
         let callback = Arc::new(Mutex::new(move |data: &[u8], timestamp: u64| {
+            println!("🎹 MIDI данные получены в callback: {:?}", data);
+            
             // Парсим MIDI данные
             if let Ok(midi_event) = MidiEvent::from_midi_data(data, timestamp) {
+                println!("✅ Успешно распарсили MIDI событие: {:?}", midi_event);
+                
                 // Обновляем статистику
                 {
                     let mut stats_mut = stats.lock().unwrap();
                     Self::update_stats(&midi_event, &mut stats_mut);
+                    println!("📊 Статистика обновлена");
                 }
                 
                 // Обрабатываем через кривую
                 let processed_event = Self::process_velocity(midi_event, &curve_processor);
+                println!("🔄 Применили кривую velocity: {:?}", processed_event);
                 
-                // Отправляем обработанное событие
+                // Отправляем обработанное событие через callback
                 if let Some(ref callback) = output_callback {
+                    println!("📞 Вызываем output callback");
                     callback(processed_event.clone());
+                } else {
+                    println!("⚠️ Output callback не установлен");
                 }
                 
                 // Отправляем на выходные порты
                 let output_data = processed_event.to_midi_data();
+                
+                println!("📤 Готовимся отправить MIDI данные: {:?}", output_data);
+                println!("🔍 Начинаем обработку выходных портов...");
+                
+                // Отправляем на все подключенные выходные порты
+                {
+                    let mut port_manager = port_manager_for_callback.lock().unwrap();
+                    println!("🔍 Найдено выходных портов: {} (MUTEX ЗАХВАЧЕН)", port_manager.output_ports.len());
+                    
+                    let mut sent_count = 0;
+                    
+                    for (port_id, output_port) in &mut port_manager.output_ports {
+                        println!("🔍 Проверяем порт '{}': подключен={}", port_id, output_port.is_connected());
+                        
+                        if output_port.is_connected() {
+                            println!("🎵 Отправляем данные на порт '{}'...", port_id);
+                            
+                            match output_port.send_midi(&output_data) {
+                                Ok(_) => {
+                                    println!("✅ УСПЕХ: MIDI событие отправлено на порт '{}'", port_id);
+                                    sent_count += 1;
+                                }
+                                Err(e) => {
+                                    println!("❌ ОШИБКА: Не удалось отправить на порт '{}': {}", port_id, e);
+                                }
+                            }
+                        } else {
+                            println!("⚠️ Порт '{}' НЕ подключен", port_id);
+                        }
+                    }
+                    
+                    println!("📊 Итог: успешно отправлено на {} портов из {}", sent_count, port_manager.output_ports.len());
+                }
+                
+                // Также обрабатываем через event processor для дополнительной логики
                 let _ = event_processor.lock().unwrap().process_midi_data(&output_data, timestamp);
+                println!("📊 Event processor обработал данные");
+            } else {
+                println!("❌ Ошибка парсинга MIDI данных: {:?}", data);
             }
+            
+            println!("🔚 Завершаем callback\n");
         }));
         
         // Создаем новый входной порт с callback
