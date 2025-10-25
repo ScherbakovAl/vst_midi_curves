@@ -1,5 +1,5 @@
 //! MIDI Curves - Standalone приложение для обработки MIDI velocity с настраиваемыми кривыми
-//! 
+//!
 //! Это standalone версия плагина, которая предоставляет полноценный GUI интерфейс
 //! для редактирования кривых Безье и обработки MIDI в реальном времени.
 
@@ -9,27 +9,21 @@ use std::sync::{Arc, Mutex};
 // Подключаем модули проекта
 mod curve;
 mod presets;
+mod midi;
+mod midi_simple;
 
-use curve::{BezierCurve, ControlPoint};
+use curve::BezierCurve;
 use presets::{PresetManager, CurvePreset};
-use egui::{Pos2, Rect, Sense, Response, Painter, Color32, Stroke, Shape};
+use midi::{MidiManager, MidiEvent, MidiStats};
+use midi_simple::{SimpleMidiManager, SimpleMidiEvent, SimpleMidiStats};
+use egui::{Pos2, Rect, Sense, Response, Painter, Color32, Stroke};
 
-// MIDI порт структура
+// MIDI события для отображения в GUI
 #[derive(Debug, Clone)]
-struct MidiPort {
-    name: String,
-    is_input: bool,
-    is_output: bool,
-}
-
-// Состояние MIDI
-struct MidiState {
-    input_ports: Vec<MidiPort>,
-    output_ports: Vec<MidiPort>,
-    selected_input: Option<usize>,
-    selected_output: Option<usize>,
-    input_velocity: u8,
-    output_velocity: u8,
+struct GuiMidiEvent {
+    event: SimpleMidiEvent,
+    timestamp: std::time::Instant,
+    is_processed: bool,
 }
 
 // Главная структура приложения
@@ -37,8 +31,18 @@ struct MidiCurvesApp {
     // Ядро обработки кривых
     curve: Arc<Mutex<BezierCurve>>,
     
-    // Состояние MIDI
-    midi_state: MidiState,
+    // Полный MIDI менеджер (заменен на простой для тестирования)
+    midi_manager: Arc<Mutex<MidiManager>>,
+    midi_input_ports: Vec<String>,
+    midi_output_ports: Vec<String>,
+    selected_input_port: Option<String>,
+    selected_output_port: Option<String>,
+    midi_stats: MidiStats,
+    midi_events: Vec<MidiEvent>,
+    
+    // Простой MIDI менеджер для тестирования
+    simple_midi_manager: Arc<Mutex<SimpleMidiManager>>,
+    simple_midi_events: Vec<SimpleMidiEvent>,
     
     // Состояние интерфейса
     selected_point: Option<usize>,
@@ -50,7 +54,6 @@ struct MidiCurvesApp {
     selected_preset: Option<String>,
 }
 
-// Встроенные пресеты кривых
 impl MidiCurvesApp {
     fn new() -> Result<Self, Box<dyn std::error::Error>> {
         let preset_manager = Arc::new(Mutex::new(PresetManager::new()?));
@@ -61,22 +64,48 @@ impl MidiCurvesApp {
             manager.create_builtin_presets()?;
         }
         
-        Ok(Self {
-            curve: Arc::new(Mutex::new(BezierCurve::new())),
-            midi_state: MidiState {
-                input_ports: Vec::new(),
-                output_ports: Vec::new(),
-                selected_input: None,
-                selected_output: None,
-                input_velocity: 64,
-                output_velocity: 64,
-            },
+        // Создаем кривую для обработки velocity
+        let curve_processor = Arc::new(Mutex::new(BezierCurve::new()));
+        
+        // Создаем простой MIDI менеджер для тестирования (временно)
+        let simple_midi_manager = Arc::new(Mutex::new(SimpleMidiManager::new(curve_processor.clone())));
+        
+        // Инициализируем приложение
+        let mut app = Self {
+            curve: curve_processor.clone(),
+            midi_manager: Arc::new(Mutex::new(MidiManager::new(curve_processor.clone()))),
+            midi_input_ports: Vec::new(),
+            midi_output_ports: Vec::new(),
+            selected_input_port: None,
+            selected_output_port: None,
+            midi_stats: MidiStats::new(),
+            midi_events: Vec::new(),
+            simple_midi_manager,
+            simple_midi_events: Vec::new(),
             selected_point: None,
             is_dragging: false,
             drag_start: None,
             preset_manager,
             selected_preset: None,
-        })
+        };
+        
+        // Запускаем простой MIDI менеджер для тестирования
+        {
+            let mut simple_midi_manager = app.simple_midi_manager.lock().unwrap();
+            simple_midi_manager.start()?;
+            simple_midi_manager.refresh_ports();
+        }
+        
+        // Запускаем полный MIDI менеджер
+        {
+            let mut midi_manager_mut = app.midi_manager.lock().unwrap();
+            midi_manager_mut.start()?;
+        }
+        
+        // Обновляем список MIDI портов при запуске
+        app.refresh_midi_ports();
+        
+        Ok(app)
     }
     
     // Обработка MIDI входного сигнала
@@ -87,7 +116,90 @@ impl MidiCurvesApp {
     
     // Тестирование кривой
     fn test_curve(&mut self) {
-        self.midi_state.output_velocity = self.process_input_velocity(self.midi_state.input_velocity);
+        let input_velocity = 64; // Тестовое значение
+        let output_velocity = self.process_input_velocity(input_velocity);
+        println!("🎵 Тест velocity: {} -> {}", input_velocity, output_velocity);
+    }
+    
+    // Обновление списка MIDI портов
+    fn refresh_midi_ports(&mut self) {
+        // Используем простой MIDI менеджер для тестирования
+        let simple_midi_manager = self.simple_midi_manager.lock().unwrap();
+        self.midi_input_ports = simple_midi_manager.get_input_ports();
+        self.midi_output_ports = simple_midi_manager.get_output_ports();
+        
+        // Получаем статистику из полного MIDI менеджера
+        let full_midi_manager = self.midi_manager.lock().unwrap();
+        self.midi_stats = full_midi_manager.get_stats();
+        
+        println!("🔍 Обновлен список MIDI портов: {} входных, {} выходных",
+                 self.midi_input_ports.len(), self.midi_output_ports.len());
+    }
+    
+    // Подключение к входному MIDI порту
+    fn connect_input_port(&mut self, port_name: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let mut midi_manager = self.midi_manager.lock().unwrap();
+        midi_manager.connect_input_port(port_name)?;
+        self.selected_input_port = Some(port_name.to_string());
+        
+        println!("🎹 Подключен входной MIDI порт: {}", port_name);
+        Ok(())
+    }
+    
+    // Подключение к выходному MIDI порту
+    fn connect_output_port(&mut self, port_name: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let mut midi_manager = self.midi_manager.lock().unwrap();
+        midi_manager.connect_output_port(port_name)?;
+        self.selected_output_port = Some(port_name.to_string());
+        println!("🎵 Подключен выходной MIDI порт: {}", port_name);
+        Ok(())
+    }
+    
+    // Отключение всех MIDI портов
+    fn disconnect_all_ports(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        let mut midi_manager = self.midi_manager.lock().unwrap();
+        midi_manager.disconnect_all_ports()?;
+        self.selected_input_port = None;
+        self.selected_output_port = None;
+        println!("🔌 Отключены все MIDI порты");
+        Ok(())
+    }
+    
+    // Отключение входного MIDI порта
+    fn disconnect_input_port(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        let mut midi_manager = self.midi_manager.lock().unwrap();
+        midi_manager.disconnect_input_port()?;
+        self.selected_input_port = None;
+        println!("🔌 Отключен входной MIDI порт");
+        Ok(())
+    }
+    
+    // Отключение выходного MIDI порта
+    fn disconnect_output_port(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        let mut midi_manager = self.midi_manager.lock().unwrap();
+        midi_manager.disconnect_output_port()?;
+        self.selected_output_port = None;
+        println!("🔌 Отключен выходной MIDI порт");
+        Ok(())
+    }
+    
+    // Проверка активности MIDI
+    fn is_midi_active(&self) -> bool {
+        let midi_manager = self.midi_manager.lock().unwrap();
+        midi_manager.is_active()
+    }
+    
+    // Обновление списка MIDI событий для GUI
+    fn update_midi_events(&mut self) {
+        // В реальной реализации здесь события поступают через callbacks
+        // Пока оставляем пустым для совместимости с простым менеджером
+    }
+    
+    // Тестирование MIDI обработки через простой менеджер (временно)
+    fn test_midi_processing(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        let mut simple_midi_manager = self.simple_midi_manager.lock().unwrap();
+        simple_midi_manager.generate_test_event()?;
+        Ok(())
     }
     
     // Загрузка пресета
@@ -285,22 +397,22 @@ impl MidiCurvesApp {
                 
                 ui.add_space(10.0);
                 
-                // Панель пресетов
-                egui::Frame::group(ui.style())
-                    .fill(egui::Color32::from_gray(30))
-                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(60)))
-                    .show(ui, |ui| {
-                        self.draw_presets_panel(ui);
-                    });
-                
-                ui.add_space(10.0);
-                
-                // Панель MIDI
+                // MIDI панель (перемещена влево)
                 egui::Frame::group(ui.style())
                     .fill(egui::Color32::from_gray(30))
                     .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(60)))
                     .show(ui, |ui| {
                         self.draw_midi_panel(ui);
+                    });
+                
+                ui.add_space(10.0);
+                
+                // Панель пресетов (перемещена вправо)
+                egui::Frame::group(ui.style())
+                    .fill(egui::Color32::from_gray(30))
+                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(60)))
+                    .show(ui, |ui| {
+                        self.draw_presets_panel(ui);
                     });
             });
         });
@@ -309,42 +421,31 @@ impl MidiCurvesApp {
     
     
     fn draw_test_panel(&mut self, ui: &mut egui::Ui) {
-        ui.label(egui::RichText::new("🎯 Тест кривой").size(14.0));
-        ui.add_space(5.0);
+        ui.label(egui::RichText::new("🎯 Тест кривой").size(12.0));
+        ui.add_space(3.0);
         
-        // Слайдер для входного velocity
-        ui.vertical(|ui| {
-            ui.label("Input Velocity:");
-            ui.add(
-                egui::Slider::new(&mut self.midi_state.input_velocity, 0..=127)
-                    .show_value(false)
-            );
-            ui.label(format!("{}", self.midi_state.input_velocity));
-        });
-        
-        ui.add_space(5.0);
-        
-        // Автоматическое обновление выходного значения
-        self.test_curve();
-        
-        // Отображение результата
+        // Используем интерактивный слайдер для тестового значения
+        let mut test_velocity = 64; // Начальное значение
         ui.horizontal(|ui| {
-            ui.label("Output:");
-            ui.label(format!("{}", self.midi_state.output_velocity));
+            ui.label("Velocity:");
+            ui.add(egui::Slider::new(&mut test_velocity, 0..=127).show_value(false));
+            ui.label(format!("{}", test_velocity));
         });
+        
+        let output_velocity = self.process_input_velocity(test_velocity);
         
         ui.add_space(5.0);
         
         // Визуальная индикация
         ui.vertical(|ui| {
-            let bar_width = 280.0;
+            let bar_width = 200.0;
             
             // Полоса входного значения
             ui.horizontal(|ui| {
                 ui.label("In:");
-                let input_ratio = self.midi_state.input_velocity as f32 / 127.0;
+                let input_ratio = test_velocity as f32 / 127.0;
                 ui.add_sized(
-                    [bar_width, 15.0],
+                    [bar_width, 12.0],
                     egui::widgets::ProgressBar::new(input_ratio)
                         .fill(egui::Color32::from_rgb(100, 100, 200))
                 );
@@ -353,14 +454,20 @@ impl MidiCurvesApp {
             // Полоса выходного значения
             ui.horizontal(|ui| {
                 ui.label("Out:");
-                let output_ratio = self.midi_state.output_velocity as f32 / 127.0;
+                let output_ratio = output_velocity as f32 / 127.0;
                 ui.add_sized(
-                    [bar_width, 15.0],
+                    [bar_width, 12.0],
                     egui::widgets::ProgressBar::new(output_ratio)
                         .fill(egui::Color32::from_rgb(100, 200, 100))
                 );
             });
         });
+        
+        ui.add_space(3.0);
+        
+        if ui.button("🧪 Тест").clicked() {
+            self.test_curve();
+        }
     }
     
     fn draw_presets_panel(&mut self, ui: &mut egui::Ui) {
@@ -417,16 +524,191 @@ impl MidiCurvesApp {
     }
     
     fn draw_midi_panel(&mut self, ui: &mut egui::Ui) {
-        ui.label(egui::RichText::new("🎹 MIDI").size(14.0));
+        ui.label(egui::RichText::new("🎹 MIDI Панель").size(12.0));
+        ui.add_space(3.0);
+        
+        // Кнопки управления MIDI
+        ui.horizontal(|ui| {
+            if ui.button("🔄 Обновить").clicked() {
+                self.refresh_midi_ports();
+            }
+            
+            if ui.button("🎵 Тест").clicked() {
+                if let Err(e) = self.test_midi_processing() {
+                    eprintln!("Ошибка MIDI теста: {}", e);
+                }
+            }
+        });
+        
+        ui.add_space(10.0);
+        
+        // Статус MIDI подключения
+        let is_active = self.is_midi_active();
+        let status_text = format!("Статус: {}", if is_active { "Активен" } else { "Неактивен" });
+        let status_color = if is_active {
+            egui::Color32::from_rgb(100, 200, 100) // Зеленый
+        } else {
+            egui::Color32::from_rgb(200, 100, 100) // Красный
+        };
+        
+        ui.colored_label(status_color, status_text);
+        
         ui.add_space(5.0);
         
-        ui.label("⚠️ Полная MIDI поддержка будет добавлена в следующей версии");
+        // Выпадающий список для выбора входного MIDI порта
+        ui.horizontal(|ui| {
+            ui.label("📥 Входной порт:");
+            
+            let selected_text = match &self.selected_input_port {
+                Some(name) => name.clone(),
+                None => "Не выбран".to_string(),
+            };
+            
+            // Сохраняем индекс выбранного порта для изменения
+            let mut input_port_changed = None;
+            
+            egui::ComboBox::from_id_source("input_port_selector")
+                .selected_text(&selected_text)
+                .show_ui(ui, |ui| {
+                    // Опция "Отключить"
+                    if ui.selectable_label(self.selected_input_port.is_none(), "🔌 Отключен").clicked() {
+                        input_port_changed = Some(None);
+                        ui.close_menu();
+                    }
+                    
+                    // Список доступных портов
+                    for (index, port_name) in self.midi_input_ports.iter().enumerate() {
+                        let is_selected = self.selected_input_port.as_ref() == Some(port_name);
+                        let display_text = if is_selected { "🔗 " } else { "📥 " };
+                        
+                        if ui.selectable_label(is_selected, format!("{}{}", display_text, port_name)).clicked() {
+                            input_port_changed = Some(Some(index));
+                            ui.close_menu();
+                        }
+                    }
+                });
+                
+            // Обработка изменения выбора после показа UI
+            if let Some(maybe_index) = input_port_changed {
+                if let Some(index) = maybe_index {
+                    // Клонируем имя порта до вызова методов
+                    if let Some(port_name) = self.midi_input_ports.get(index) {
+                        let port_name_cloned = port_name.clone();
+                        match self.connect_input_port(&port_name_cloned) {
+                            Ok(_) => {
+                                self.selected_input_port = Some(port_name_cloned);
+                            }
+                            Err(e) => {
+                                eprintln!("Ошибка подключения входного порта: {}", e);
+                            }
+                        }
+                    }
+                } else {
+                    // Отключаем порт
+                    let _ = self.disconnect_input_port();
+                }
+            }
+        });
+        
+        ui.add_space(3.0);
+        
+        // Выпадающий список для выбора выходного MIDI порта
+        ui.horizontal(|ui| {
+            ui.label("📤 Выходной порт:");
+            
+            let selected_text = match &self.selected_output_port {
+                Some(name) => name.clone(),
+                None => "Не выбран".to_string(),
+            };
+            
+            // Сохраняем индекс выбранного порта для изменения
+            let mut output_port_changed = None;
+            
+            egui::ComboBox::from_id_source("output_port_selector")
+                .selected_text(&selected_text)
+                .show_ui(ui, |ui| {
+                    // Опция "Отключить"
+                    if ui.selectable_label(self.selected_output_port.is_none(), "🔌 Отключен").clicked() {
+                        output_port_changed = Some(None);
+                        ui.close_menu();
+                    }
+                    
+                    // Список доступных портов
+                    for (index, port_name) in self.midi_output_ports.iter().enumerate() {
+                        let is_selected = self.selected_output_port.as_ref() == Some(port_name);
+                        let display_text = if is_selected { "🔗 " } else { "📤 " };
+                        
+                        if ui.selectable_label(is_selected, format!("{}{}", display_text, port_name)).clicked() {
+                            output_port_changed = Some(Some(index));
+                            ui.close_menu();
+                        }
+                    }
+                });
+                
+            // Обработка изменения выбора после показа UI
+            if let Some(maybe_index) = output_port_changed {
+                if let Some(index) = maybe_index {
+                    // Клонируем имя порта до вызова методов
+                    if let Some(port_name) = self.midi_output_ports.get(index) {
+                        let port_name_cloned = port_name.clone();
+                        match self.connect_output_port(&port_name_cloned) {
+                            Ok(_) => {
+                                self.selected_output_port = Some(port_name_cloned);
+                            }
+                            Err(e) => {
+                                eprintln!("Ошибка подключения выходного порта: {}", e);
+                            }
+                        }
+                    }
+                } else {
+                    // Отключаем порт
+                    let _ = self.disconnect_output_port();
+                }
+            }
+        });
+        
         ui.add_space(5.0);
         
-        // Информация о MIDI портах (заглушка)
-        ui.label("MIDI порты:");
-        ui.label("Входные: Не найдены");
-        ui.label("Выходные: Не найдены");
+        // Кнопка отключения всех портов
+        if is_active && ui.button("🔌 Отключить все").clicked() {
+            if let Err(e) = self.disconnect_all_ports() {
+                eprintln!("Ошибка отключения портов: {}", e);
+            }
+        }
+        
+        ui.add_space(10.0);
+        
+        // Статистика MIDI с прокручиванием
+        egui::CollapsingHeader::new("📊 Статистика")
+            .default_open(false)
+            .show(ui, |ui| {
+                ui.add_space(2.0);
+                
+                egui::ScrollArea::vertical()
+                    .max_height(80.0)
+                    .show(ui, |ui| {
+                        ui.label(format!("Note On: {}", self.midi_stats.note_on_count));
+                        ui.label(format!("Note Off: {}", self.midi_stats.note_off_count));
+                        ui.label(format!("Control Change: {}", self.midi_stats.control_change_count));
+                        
+                        if self.midi_stats.note_on_count > 0 || self.midi_stats.note_off_count > 0 || self.midi_stats.control_change_count > 0 {
+                            ui.colored_label(egui::Color32::GREEN, "✅ Активность обнаружена");
+                        }
+                    });
+            });
+        
+        ui.add_space(10.0);
+        
+        // Информация о MIDI системе
+        ui.label("💡 Инфо:");
+        ui.small("• Подключите MIDI клавиатуру");
+        ui.small("• Или используйте виртуальные порты");
+        ui.small("• События обрабатываются кривой");
+        
+        if self.midi_input_ports.is_empty() && self.midi_output_ports.is_empty() {
+            ui.add_space(3.0);
+            ui.colored_label(egui::Color32::YELLOW, "⚠️ MIDI порты не найдены!");
+        }
     }
     
     fn handle_curve_interaction(&mut self, response: &Response) {
