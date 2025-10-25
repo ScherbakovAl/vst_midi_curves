@@ -195,8 +195,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-nih_plug = { version = "0.5", features = ["standalone"] }
-nih_plug_egui = "0.5"
+nih_plug = { git = "https://github.com/robbert-vdh/nih-plug", features = ["vst3", "standalone"] }
+nih_plug_egui = { git = "https://github.com/robbert-vdh/nih-plug" }
 egui = "0.28"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -210,13 +210,12 @@ lto = "fat"
 opt-level = 3
 codegen-units = 1
 ```
+**Примечание:** Используется версия nih-plug из git-репозитория, так как версия 0.5 еще не опубликована на crates.io.
 
 #### Задача 1.2: Создание базовой структуры
 - Создать модульную структуру проекта
 - Настроить сборку для разных платформ
 - Добавить GitHub Actions для CI/CD (опционально)
-
----
 
 ### Этап 2: Базовый плагин (2-3 дня)
 
