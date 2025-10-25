@@ -192,46 +192,94 @@ impl eframe::App for MidiCurvesApp {
 
 impl MidiCurvesApp {
     fn draw_main_ui(&mut self, ui: &mut egui::Ui) {
-        // Верхняя панель с названием и кнопками
+        // Заголовок приложения
         ui.horizontal(|ui| {
             ui.label(egui::RichText::new("🎵 VST MIDI Curves Plugin").size(18.0));
-            ui.add_space(20.0);
-            if ui.button("🔄 Сбросить кривую").clicked() {
-                self.reset_curve();
-            }
-            if ui.button("🎯 Тест кривой").clicked() {
-                self.test_curve();
-            }
-            if ui.button("📁 Пресеты").clicked() {
-                // Переключение на панель пресетов
-            }
-            if ui.button("🎹 MIDI").clicked() {
-                // Переключение на панель MIDI
-            }
         });
         
         ui.add_space(10.0);
         
+        // Основной layout с горизонтальным разделением
         ui.horizontal(|ui| {
-            // Левая панель - основной редактор кривой
-            ui.group(|ui| {
-                ui.set_min_width(650.0);
-                ui.set_min_height(500.0);
-                self.draw_curve_editor(ui);
+            // Левая часть - график с подписью и управлением
+            ui.vertical(|ui| {
+                ui.set_min_width(600.0);
+                
+                // Заголовок над графиком
+                ui.label(egui::RichText::new("🎯 Редактор кривой Безье").size(16.0));
+                
+                // Область графика
+                ui.add_space(5.0);
+                let (response, painter) = ui.allocate_painter(
+                    egui::vec2(600.0, 400.0),
+                    Sense::click_and_drag(),
+                );
+                
+                // Обработка взаимодействия с кривой
+                self.handle_curve_interaction(&response);
+                
+                // Отрисовка кривой
+                self.draw_curve(&painter, response.rect);
+                
+                ui.add_space(10.0);
+                
+                // Информация о выбранной точке под графиком
+                if let Some(index) = self.selected_point {
+                    let curve = self.curve.lock().unwrap();
+                    if let Some(point) = curve.control_points.get(index) {
+                        ui.label(format!("🎯 Выбрана точка {}: ({:.1}, {:.1})", index, point.position.0, point.position.1));
+                    }
+                } else {
+                    ui.label("🎯 Точка не выбрана - кликните по кривой для выбора");
+                }
+                
+                ui.add_space(5.0);
+                
+                // Кнопки управления точками под графиком
+                ui.horizontal(|ui| {
+                    if ui.button("➕ Добавить точку").clicked() {
+                        if let Some(hover_pos) = response.hover_pos() {
+                            self.add_control_point(hover_pos, response.rect);
+                        }
+                    }
+                    
+                    if ui.button("❌ Удалить точку").clicked() {
+                        self.remove_selected_point();
+                    }
+                    
+                    if ui.button("🔄 Сброс к линейной").clicked() {
+                        self.reset_curve();
+                    }
+                });
+                
+                ui.add_space(5.0);
+                
+                // Информация о текущих точках
+                let curve = self.curve.lock().unwrap();
+                ui.label(format!("📊 Всего точек: {}", curve.control_points.len()));
+                
+                if !curve.control_points.is_empty() {
+                    egui::ScrollArea::vertical()
+                        .max_height(100.0)
+                        .show(ui, |ui| {
+                            ui.label("📋 Список точек:");
+                            for (i, point) in curve.control_points.iter().enumerate() {
+                                let marker = if Some(i) == self.selected_point { "▶ " } else { "• " };
+                                ui.label(format!("{}Точка {}: ({:.1}, {:.1})", marker, i, point.position.0, point.position.1));
+                            }
+                        });
+                }
             });
 
-            // Правая панель - дополнительные элементы
+            // Правая часть - панели теста, пресетов и MIDI
             ui.vertical(|ui| {
-                ui.set_min_width(300.0);
-                ui.set_min_height(500.0);
+                ui.set_min_width(350.0);
                 
                 // Панель тестирования
                 egui::Frame::group(ui.style())
                     .fill(egui::Color32::from_gray(30))
                     .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(60)))
                     .show(ui, |ui| {
-                        ui.label(egui::RichText::new("🎯 Тест кривой").size(14.0));
-                        ui.add_space(5.0);
                         self.draw_test_panel(ui);
                     });
                 
@@ -242,216 +290,143 @@ impl MidiCurvesApp {
                     .fill(egui::Color32::from_gray(30))
                     .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(60)))
                     .show(ui, |ui| {
-                        ui.label(egui::RichText::new("📁 Пресеты").size(14.0));
-                        ui.add_space(5.0);
                         self.draw_presets_panel(ui);
                     });
                 
                 ui.add_space(10.0);
                 
-                // Панель MIDI (заглушка)
+                // Панель MIDI
                 egui::Frame::group(ui.style())
                     .fill(egui::Color32::from_gray(30))
                     .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(60)))
                     .show(ui, |ui| {
-                        ui.label(egui::RichText::new("🎹 MIDI").size(14.0));
-                        ui.add_space(5.0);
                         self.draw_midi_panel(ui);
                     });
             });
         });
     }
     
-    fn draw_curve_editor(&mut self, ui: &mut egui::Ui) {
-        ui.label(egui::RichText::new("🎯 Редактор кривой Безье").size(16.0));
-        ui.add_space(10.0);
-        
-        // Область для отрисовки кривой
-        let (response, painter) = ui.allocate_painter(
-            egui::vec2(600.0, 400.0),
-            Sense::click_and_drag(),
-        );
-        
-        // Отрисовка области для кривой
-        
-        // Обработка взаимодействия с кривой
-        self.handle_curve_interaction(&response);
-        
-        // Отрисовка кривой
-        self.draw_curve(&painter, response.rect);
-        
-        ui.add_space(10.0);
-        
-        // Информация о выбранной точке
-        if let Some(index) = self.selected_point {
-            let curve = self.curve.lock().unwrap();
-            if let Some(point) = curve.control_points.get(index) {
-                ui.label(format!("🎯 Выбрана точка {}: ({:.1}, {:.1})", index, point.position.0, point.position.1));
-            }
-        } else {
-            ui.label("🎯 Точка не выбрана - кликните по кривой для выбора");
-        }
-        
+    
+    
+    fn draw_test_panel(&mut self, ui: &mut egui::Ui) {
+        ui.label(egui::RichText::new("🎯 Тест кривой").size(14.0));
         ui.add_space(5.0);
         
-        // Кнопки управления точками
-        ui.horizontal(|ui| {
-            if ui.button("➕ Добавить точку").clicked() {
-                if let Some(hover_pos) = response.hover_pos() {
-                    self.add_control_point(hover_pos, response.rect);
-                }
-            }
-            
-            if ui.button("❌ Удалить точку").clicked() {
-                self.remove_selected_point();
-            }
-            
-            if ui.button("🔄 Сброс к линейной").clicked() {
-                self.reset_curve();
-            }
+        // Слайдер для входного velocity
+        ui.vertical(|ui| {
+            ui.label("Input Velocity:");
+            ui.add(
+                egui::Slider::new(&mut self.midi_state.input_velocity, 0..=127)
+                    .show_value(false)
+            );
+            ui.label(format!("{}", self.midi_state.input_velocity));
         });
         
         ui.add_space(5.0);
         
-        // Информация о текущих точках
-        let curve = self.curve.lock().unwrap();
-        ui.label(format!("📊 Всего точек: {}", curve.control_points.len()));
+        // Автоматическое обновление выходного значения
+        self.test_curve();
         
-        if !curve.control_points.is_empty() {
-            ui.label("📋 Список точек:");
-            for (i, point) in curve.control_points.iter().enumerate() {
-                let marker = if Some(i) == self.selected_point { "▶ " } else { "• " };
-                ui.label(format!("{}Точка {}: ({:.1}, {:.1})", marker, i, point.position.0, point.position.1));
-            }
-        }
-    }
-    
-    fn draw_test_panel(&mut self, ui: &mut egui::Ui) {
-        ui.group(|ui| {
-            ui.label("🧪 Тестирование кривой");
+        // Отображение результата
+        ui.horizontal(|ui| {
+            ui.label("Output:");
+            ui.label(format!("{}", self.midi_state.output_velocity));
+        });
+        
+        ui.add_space(5.0);
+        
+        // Визуальная индикация
+        ui.vertical(|ui| {
+            let bar_width = 280.0;
             
-            // Слайдер для входного velocity
+            // Полоса входного значения
             ui.horizontal(|ui| {
-                ui.label("Input Velocity:");
-                ui.add(
-                    egui::Slider::new(&mut self.midi_state.input_velocity, 0..=127)
-                        .show_value(false)
+                ui.label("In:");
+                let input_ratio = self.midi_state.input_velocity as f32 / 127.0;
+                ui.add_sized(
+                    [bar_width, 15.0],
+                    egui::widgets::ProgressBar::new(input_ratio)
+                        .fill(egui::Color32::from_rgb(100, 100, 200))
                 );
-                ui.label(format!("{}", self.midi_state.input_velocity));
             });
             
-            // Автоматическое обновление выходного значения
-            self.test_curve();
-            
-            // Отображение результата
+            // Полоса выходного значения
             ui.horizontal(|ui| {
-                ui.label("Output Velocity:");
-                ui.label(format!("{}", self.midi_state.output_velocity));
-            });
-            
-            // Визуальная индикация
-            ui.vertical(|ui| {
-                ui.label("Визуальная индикация:");
-                
-                let bar_width = 200.0;
-                
-                // Полоса входного значения
-                ui.horizontal(|ui| {
-                    ui.label("In:");
-                    let input_ratio = self.midi_state.input_velocity as f32 / 127.0;
-                    ui.add_sized(
-                        [bar_width, 20.0],
-                        egui::widgets::ProgressBar::new(input_ratio)
-                            .fill(egui::Color32::from_rgb(100, 100, 200))
-                    );
-                });
-                
-                // Полоса выходного значения
-                ui.horizontal(|ui| {
-                    ui.label("Out:");
-                    let output_ratio = self.midi_state.output_velocity as f32 / 127.0;
-                    ui.add_sized(
-                        [bar_width, 20.0],
-                        egui::widgets::ProgressBar::new(output_ratio)
-                            .fill(egui::Color32::from_rgb(100, 200, 100))
-                    );
-                });
+                ui.label("Out:");
+                let output_ratio = self.midi_state.output_velocity as f32 / 127.0;
+                ui.add_sized(
+                    [bar_width, 15.0],
+                    egui::widgets::ProgressBar::new(output_ratio)
+                        .fill(egui::Color32::from_rgb(100, 200, 100))
+                );
             });
         });
     }
     
     fn draw_presets_panel(&mut self, ui: &mut egui::Ui) {
-        ui.group(|ui| {
-            ui.label("🎚️ Пресеты");
-            
-            // Получаем список пресетов
-            let preset_names = self.preset_manager.lock().unwrap().get_preset_names();
-            
-            // Показываем текущий выбранный пресет
-            if let Some(selected) = &self.selected_preset {
-                ui.label(format!("Текущий: {}", selected));
-            } else {
-                ui.label("Текущий: (пользовательская кривая)");
+        ui.label(egui::RichText::new("📁 Пресеты").size(14.0));
+        ui.add_space(5.0);
+        
+        // Получаем список пресетов
+        let preset_names = self.preset_manager.lock().unwrap().get_preset_names();
+        
+        // Показываем текущий выбранный пресет
+        if let Some(selected) = &self.selected_preset {
+            ui.label(format!("Текущий: {}", selected));
+        } else {
+            ui.label("Текущий: (пользовательская кривая)");
+        }
+        
+        ui.add_space(5.0);
+        
+        // Кнопки управления пресетами
+        ui.horizontal(|ui| {
+            if ui.button("Загрузить").clicked() {
+                if !preset_names.is_empty() {
+                    self.load_preset(&preset_names[0]);
+                }
             }
             
-            ui.separator();
+            if ui.button("Сохранить").clicked() {
+                // TODO: Показать диалог сохранения
+            }
             
-            // Кнопки управления пресетами
-            ui.horizontal(|ui| {
-                if ui.button("Загрузить").clicked() {
-                    if !preset_names.is_empty() {
-                        self.load_preset(&preset_names[0]);
+            if ui.button("Удалить").clicked() {
+                if let Some(selected_preset) = &self.selected_preset {
+                    if let Err(e) = self.preset_manager.lock().unwrap().remove_preset(selected_preset) {
+                        eprintln!("Ошибка удаления пресета: {}", e);
                     }
                 }
-                
-                if ui.button("Сохранить").clicked() {
-                    // TODO: Показать диалог сохранения
-                }
-                
-                if ui.button("Удалить").clicked() {
-                    if let Some(selected_preset) = &self.selected_preset {
-                        if let Err(e) = self.preset_manager.lock().unwrap().remove_preset(selected_preset) {
-                            eprintln!("Ошибка удаления пресета: {}", e);
-                        }
+            }
+        });
+        
+        ui.add_space(5.0);
+        
+        // Список доступных пресетов с прокруткой
+        ui.label("Доступные пресеты:");
+        egui::ScrollArea::vertical()
+            .max_height(120.0)
+            .show(ui, |ui| {
+                for preset_name in preset_names {
+                    let is_selected = self.selected_preset.as_ref() == Some(&preset_name);
+                    if ui.selectable_label(is_selected, &preset_name).clicked() {
+                        self.selected_preset = Some(preset_name);
                     }
                 }
             });
-            
-            ui.separator();
-            
-            // Список доступных пресетов
-            ui.label("Доступные пресеты:");
-            egui::ScrollArea::vertical()
-                .max_height(200.0)
-                .show(ui, |ui| {
-                    for preset_name in preset_names {
-                        let is_selected = self.selected_preset.as_ref() == Some(&preset_name);
-                        if ui.selectable_label(is_selected, &preset_name).clicked() {
-                            self.selected_preset = Some(preset_name);
-                        }
-                    }
-                });
-        });
     }
     
     fn draw_midi_panel(&mut self, ui: &mut egui::Ui) {
-        ui.group(|ui| {
-            ui.label("🎵 MIDI настройки");
-            
-            ui.label("⚠️ Полная MIDI поддержка будет добавлена в следующей версии");
-            ui.label("Пока доступно только тестирование кривой");
-            
-            // Информация о MIDI портах (заглушка)
-            ui.horizontal(|ui| {
-                ui.label("Входные порты:");
-                ui.label("Не найдены");
-            });
-            
-            ui.horizontal(|ui| {
-                ui.label("Выходные порты:");
-                ui.label("Не найдены");
-            });
-        });
+        ui.label(egui::RichText::new("🎹 MIDI").size(14.0));
+        ui.add_space(5.0);
+        
+        ui.label("⚠️ Полная MIDI поддержка будет добавлена в следующей версии");
+        ui.add_space(5.0);
+        
+        // Информация о MIDI портах (заглушка)
+        ui.label("MIDI порты:");
+        ui.label("Входные: Не найдены");
+        ui.label("Выходные: Не найдены");
     }
     
     fn handle_curve_interaction(&mut self, response: &Response) {
@@ -618,7 +593,7 @@ impl MidiCurvesApp {
 fn main() -> Result<(), eframe::Error> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([800.0, 600.0])
+            .with_inner_size([1000.0, 600.0])
             .with_title("VST MIDI Curves Plugin - Beta")
             .with_resizable(true)
             .with_fullscreen(false)
