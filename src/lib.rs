@@ -1,21 +1,24 @@
 //! MIDI Curves VST3 Plugin
 //!
 //! VST3 плагин для обработки MIDI velocity с настраиваемыми кривыми Безье
+//! Включает систему сохранения и загрузки настроек
 
 use std::sync::{Arc, Mutex};
 
 use nih_plug::prelude::*;
 use nih_plug_egui::{EguiState, egui};
 
-use crate::curve::BezierCurve;
+use crate::curve::DualCurve;
 use crate::midi_simple::SimpleMidiManager;
 use crate::presets::PresetManager;
+use crate::settings::SettingsManager;
 
 // Подключаем все необходимые модули
 mod curve;
 mod presets;
 mod midi;
 mod midi_simple;
+mod settings;
 
 // Параметры плагина
 #[derive(Params)]
@@ -27,8 +30,8 @@ struct MidiCurvesParams {
 
 // Основная структура плагина
 struct MidiCurvesPlugin {
-    /// Процессор кривой Безье
-    curve_processor: Arc<Mutex<BezierCurve>>,
+    /// Процессор кривой Безье (две кривые: NoteOn и NoteOff)
+    dual_curve_processor: Arc<Mutex<DualCurve>>,
     
     /// Простой MIDI менеджер
     midi_manager: Arc<Mutex<SimpleMidiManager>>,
@@ -36,16 +39,20 @@ struct MidiCurvesPlugin {
     /// Система пресетов
     preset_manager: Arc<Mutex<PresetManager>>,
     
+    /// Менеджер настроек приложения
+    settings_manager: SettingsManager,
+    
     /// Состояние GUI
     gui_state: Arc<Mutex<GuiState>>,
 }
 
 // Структура для GUI состояния
 struct GuiController {
-    curve_processor: Arc<Mutex<BezierCurve>>,
+    dual_curve_processor: Arc<Mutex<DualCurve>>,
     midi_manager: Arc<Mutex<SimpleMidiManager>>,
     preset_manager: Arc<Mutex<PresetManager>>,
     gui_state: Arc<Mutex<GuiState>>,
+    settings_manager: SettingsManager,
 }
 
 // Состояние GUI для VST3 редактора
@@ -58,11 +65,14 @@ struct GuiState {
 
 impl Default for MidiCurvesPlugin {
     fn default() -> Self {
-        // Создаем процессор кривой
-        let curve_processor = Arc::new(Mutex::new(BezierCurve::new()));
+        // Создаем менеджер настроек (загружает сохраненные настройки если есть)
+        let settings_manager = SettingsManager::new().unwrap_or_default();
+        
+        // Восстанавливаем DualCurve из настроек или создаем новый
+        let dual_curve_processor = Arc::new(Mutex::new(settings_manager.restore_to_dual_curve()));
         
         // Создаем MIDI менеджер
-        let midi_manager = Arc::new(Mutex::new(SimpleMidiManager::new(curve_processor.clone())));
+        let midi_manager = Arc::new(Mutex::new(SimpleMidiManager::new(dual_curve_processor.clone())));
         
         // Создаем систему пресетов
         let preset_manager = Arc::new(Mutex::new(PresetManager::new().unwrap()));
@@ -74,9 +84,10 @@ impl Default for MidiCurvesPlugin {
         }
         
         Self {
-            curve_processor,
+            dual_curve_processor,
             midi_manager,
             preset_manager,
+            settings_manager: settings_manager.clone(),
             gui_state: Arc::new(Mutex::new(GuiState::default())),
         }
     }
@@ -115,10 +126,11 @@ impl Plugin for MidiCurvesPlugin {
 fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
     let egui_state = EguiState::from_size(1200, 800);
     let controller = GuiController {
-        curve_processor: self.curve_processor.clone(),
+        dual_curve_processor: self.dual_curve_processor.clone(),
         midi_manager: self.midi_manager.clone(),
         preset_manager: self.preset_manager.clone(),
         gui_state: self.gui_state.clone(),
+        settings_manager: self.settings_manager.clone(),
     };
     
     nih_plug_egui::create_egui_editor(
@@ -154,8 +166,8 @@ fn process(
                 } => {
                     // Применяем кривую к velocity
                     let processed_velocity = {
-                        let mut curve = self.curve_processor.lock().unwrap();
-                        curve.evaluate(velocity * 127.0) / 127.0
+                        let mut curve = self.dual_curve_processor.lock().unwrap();
+                        curve.process_note_on_velocity((velocity * 127.0) as u8) as f32 / 127.0
                     };
 
                     context.send_event(NoteEvent::NoteOn {
@@ -175,13 +187,18 @@ fn process(
                     velocity,
                     ..
                 } => {
-                    // NoteOff просто пропускаем
+                    // Применяем кривую для NoteOff
+                    let processed_velocity = {
+                        let mut curve = self.dual_curve_processor.lock().unwrap();
+                        curve.process_note_off_velocity((velocity * 127.0) as u8) as f32 / 127.0
+                    };
+
                     context.send_event(NoteEvent::NoteOff {
                         timing,
                         voice_id,
                         channel,
                         note,
-                        velocity,
+                        velocity: processed_velocity,
                     });
                 }
                 
@@ -259,8 +276,8 @@ impl GuiController {
         
         // Информация о выбранной точке
         if let Some(index) = self.gui_state.lock().unwrap().selected_point {
-            let curve = self.curve_processor.lock().unwrap();
-            if let Some(point) = curve.control_points.get(index) {
+            let mut curve = self.dual_curve_processor.lock().unwrap();
+            if let Some(point) = curve.note_on_curve.control_points.get(index) {
                 ui.label(format!(
                     "🎯 Выбрана точка {}: ({:.1}, {:.1})",
                     index,
@@ -279,21 +296,21 @@ impl GuiController {
             if ui.button("➕ Добавить точку").clicked() {
                 if let Some(hover_pos) = response.hover_pos() {
                     let world_pos = self.screen_to_world(hover_pos, response.rect);
-                    let mut curve = self.curve_processor.lock().unwrap();
-                    curve.add_control_point((world_pos.x, world_pos.y));
+                    let mut curve = self.dual_curve_processor.lock().unwrap();
+                    curve.add_note_on_point((world_pos.x, world_pos.y));
                 }
             }
             
             if ui.button("❌ Удалить точку").clicked() {
                 if let Some(index) = self.gui_state.lock().unwrap().selected_point {
-                    let mut curve = self.curve_processor.lock().unwrap();
-                    curve.remove_control_point(index);
+                    let mut curve = self.dual_curve_processor.lock().unwrap();
+                    curve.remove_note_on_point(index);
                     self.gui_state.lock().unwrap().selected_point = None;
                 }
             }
             
             if ui.button("🔄 Сброс к линейной").clicked() {
-                let mut curve = self.curve_processor.lock().unwrap();
+                let mut curve = self.dual_curve_processor.lock().unwrap();
                 curve.reset_to_linear();
                 self.gui_state.lock().unwrap().selected_point = None;
             }
@@ -314,8 +331,8 @@ impl GuiController {
             });
             
             let output_velocity = {
-                let mut curve = self.curve_processor.lock().unwrap();
-                curve.evaluate(test_velocity) as i32
+                let mut curve = self.dual_curve_processor.lock().unwrap();
+                curve.note_on_curve.evaluate(test_velocity) as i32
             };
             
             ui.add_space(5.0);
@@ -365,10 +382,9 @@ impl GuiController {
                         for preset_name in preset_names {
                             if ui.selectable_label(false, &preset_name).clicked() {
                                 // Загружаем пресет
-                                let mut curve = self.curve_processor.lock().unwrap();
+                                let mut curve = self.dual_curve_processor.lock().unwrap();
                                 if let Some(preset) = self.preset_manager.lock().unwrap().get_preset(&preset_name) {
-                                    curve.control_points = preset.to_control_points();
-                                    curve.dirty = true;
+                                    curve.load_from_preset(&preset);
                                 }
                             }
                         }
@@ -384,8 +400,8 @@ impl GuiController {
             ui.label(format!("Версия: {}", env!("CARGO_PKG_VERSION")));
             ui.label("Платформа: VST3 Standalone");
             
-            let curve = self.curve_processor.lock().unwrap();
-            ui.label(format!("Контрольных точек: {}", curve.control_points.len()));
+            let mut curve = self.dual_curve_processor.lock().unwrap();
+            ui.label(format!("Контрольных точек: {}", curve.note_on_curve.control_points.len()));
         });
     }
     
@@ -405,9 +421,23 @@ impl GuiController {
             if let Some(selected_index) = gui_state.selected_point {
                 if let Some(hover_pos) = response.hover_pos() {
                     let world_pos = self.screen_to_world(hover_pos, response.rect);
-                    let mut curve = self.curve_processor.lock().unwrap();
-                    curve.update_control_point(selected_index, (world_pos.x, world_pos.y));
+                    let mut curve = self.dual_curve_processor.lock().unwrap();
+                    curve.update_note_on_point(selected_index, (world_pos.x, world_pos.y));
                 }
+            }
+        }
+        
+        // Отслеживание начала перетаскивания
+        if !gui_state.is_dragging && response.dragged() && gui_state.selected_point.is_some() {
+            gui_state.is_dragging = true;
+        }
+        
+        // Сохранение настроек при отпускании кнопки мыши (drag release)
+        if response.drag_released() && gui_state.is_dragging {
+            // Мышь отпущена - сохраняем настройки
+            gui_state.is_dragging = false;
+            if let Err(e) = self.auto_save_settings() {
+                eprintln!("Ошибка автосохранения настроек VST3: {}", e);
             }
         }
         
@@ -415,8 +445,8 @@ impl GuiController {
         if response.double_clicked() {
             if let Some(hover_pos) = response.hover_pos() {
                 let world_pos = self.screen_to_world(hover_pos, response.rect);
-                let mut curve = self.curve_processor.lock().unwrap();
-                curve.add_control_point((world_pos.x, world_pos.y));
+                let mut curve = self.dual_curve_processor.lock().unwrap();
+                curve.add_note_on_point((world_pos.x, world_pos.y));
             }
         }
     }
@@ -426,9 +456,8 @@ impl GuiController {
         // Отрисовка сетки
         self.draw_grid(painter, rect);
         
-        let mut curve = self.curve_processor.lock().unwrap();
-        
-        if curve.control_points.len() < 2 {
+        let mut curve = self.dual_curve_processor.lock().unwrap();
+        if curve.note_on_curve.control_points.len() < 2 {
             return;
         }
         
@@ -436,7 +465,7 @@ impl GuiController {
         let mut curve_points = Vec::new();
         for i in 0..=128 {
             let x_input = i as f32;
-            let y_output = curve.evaluate(x_input);
+            let y_output = curve.note_on_curve.evaluate(x_input);
             
             let screen_x = rect.left() + (x_input / 127.0) * rect.width();
             let screen_y = rect.bottom() - (y_output / 127.0) * rect.height();
@@ -454,7 +483,7 @@ impl GuiController {
         
         // Рисуем контрольные точки
         let gui_state = self.gui_state.lock().unwrap();
-        for (i, point) in curve.control_points.iter().enumerate() {
+        for (i, point) in curve.note_on_curve.control_points.iter().enumerate() {
             let screen_pos = self.world_to_screen(
                 egui::pos2(point.position.0, point.position.1),
                 rect
@@ -533,9 +562,8 @@ impl GuiController {
     /// Поиск точки под курсором
     fn find_point_at(&self, screen_pos: egui::Pos2, rect: egui::Rect) -> Option<usize> {
         const CLICK_RADIUS: f32 = 12.0;
-        let curve = self.curve_processor.lock().unwrap();
-        
-        for (i, point) in curve.control_points.iter().enumerate() {
+        let mut curve = self.dual_curve_processor.lock().unwrap();
+        for (i, point) in curve.note_on_curve.control_points.iter().enumerate() {
             let point_screen = self.world_to_screen(
                 egui::pos2(point.position.0, point.position.1),
                 rect
@@ -550,6 +578,49 @@ impl GuiController {
 
 // Реализация плагина
 impl MidiCurvesPlugin {
+    /// Сохраняет текущие настройки плагина
+    pub fn save_settings(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        // Обновляем состояние кривых в настройках
+        self.settings_manager.update_from_dual_curve(&self.dual_curve_processor.lock().unwrap());
+        
+        // Сохраняем настройки в файл
+        self.settings_manager.save()
+    }
+    
+    /// Восстанавливает настройки плагина
+    pub fn load_settings(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        // Восстанавливаем DualCurve из настроек
+        let restored_curve = self.settings_manager.restore_to_dual_curve();
+        *self.dual_curve_processor.lock().unwrap() = restored_curve;
+        
+        Ok(())
+    }
+    
+    /// Сбрасывает плагин к настройкам по умолчанию
+    pub fn reset_to_defaults(&mut self) {
+        self.settings_manager.reset_to_default();
+        
+        // Применяем сброшенные настройки
+        let _ = self.load_settings();
+    }
+}
+
+// Реализация GuiController
+impl GuiController {
+    /// Автоматически сохраняет настройки если включено автосохранение
+    fn auto_save_settings(&self) -> Result<(), Box<dyn std::error::Error>> {
+        if self.settings_manager.is_auto_save_enabled() {
+            // Обновляем состояние кривых в настройках
+            let dual_curve = self.dual_curve_processor.lock().unwrap();
+            let mut settings_manager = self.settings_manager.clone();
+            settings_manager.update_from_dual_curve(&dual_curve);
+            
+            // Сохраняем настройки в файл
+            settings_manager.save()
+        } else {
+            Ok(())
+        }
+    }
 }
 
 // Экспорт плагина

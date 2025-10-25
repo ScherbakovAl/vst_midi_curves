@@ -100,8 +100,8 @@ pub struct MidiManager {
     // Управление устройствами
     device_manager: Arc<Mutex<DeviceManager>>,
     
-    // Кривая для обработки velocity
-    curve_processor: Arc<Mutex<crate::curve::BezierCurve>>,
+    // Двойная кривая для обработки NoteOn и NoteOff velocity
+    dual_curve_processor: Arc<Mutex<crate::curve::DualCurve>>,
     
     // Callbacks для UI
     input_callback: Option<MidiEventCallback>,
@@ -117,12 +117,12 @@ pub struct MidiManager {
 }
 
 impl MidiManager {
-    pub fn new(curve_processor: Arc<Mutex<crate::curve::BezierCurve>>) -> Self {
+    pub fn new(dual_curve_processor: Arc<Mutex<crate::curve::DualCurve>>) -> Self {
         Self {
             port_manager: Arc::new(Mutex::new(MidiPortManager::new())),
             event_processor: Arc::new(Mutex::new(MidiEventProcessor::new())),
             device_manager: Arc::new(Mutex::new(DeviceManager::new())),
-            curve_processor,
+            dual_curve_processor,
             input_callback: None,
             output_callback: None,
             stats: Arc::new(Mutex::new(MidiStats::new())),
@@ -143,7 +143,6 @@ impl MidiManager {
         device_manager.scan_ports()?;
         
         self.is_running = true;
-        println!("✅ MIDI менеджер запущен");
         Ok(())
     }
     
@@ -160,7 +159,6 @@ impl MidiManager {
         self.stats.lock().unwrap().reset();
         
         self.is_running = false;
-        println!("🛑 MIDI менеджер остановлен");
         Ok(())
     }
     
@@ -189,7 +187,7 @@ impl MidiManager {
         let mut port_manager = self.port_manager.lock().unwrap();
         
         // Создаем callback для обработки MIDI событий
-        let curve_processor = Arc::clone(&self.curve_processor);
+        let dual_curve_processor = Arc::clone(&self.dual_curve_processor);
         let event_processor = Arc::clone(&self.event_processor);
         let stats = Arc::clone(&self.stats);
         let output_callback = self.output_callback.clone();
@@ -197,75 +195,55 @@ impl MidiManager {
         let port_manager_for_callback = Arc::clone(&self.port_manager);
         
         let callback = Arc::new(Mutex::new(move |data: &[u8], timestamp: u64| {
-            println!("🎹 MIDI данные получены в callback: {:?}", data);
+            let receive_time = std::time::Instant::now();
             
-            // Парсим MIDI данные
+            // Parse MIDI data
             if let Ok(midi_event) = MidiEvent::from_midi_data(data, timestamp) {
-                println!("✅ Успешно распарсили MIDI событие: {:?}", midi_event);
-                
-                // Обновляем статистику
+                // Update statistics
                 {
                     let mut stats_mut = stats.lock().unwrap();
                     Self::update_stats(&midi_event, &mut stats_mut);
-                    println!("📊 Статистика обновлена");
                 }
                 
-                // Обрабатываем через кривую
-                let processed_event = Self::process_velocity(midi_event, &curve_processor);
-                println!("🔄 Применили кривую velocity: {:?}", processed_event);
+                // Process through dual velocity curves
+                let processed_event = Self::process_velocity(midi_event, &dual_curve_processor);
                 
-                // Отправляем обработанное событие через callback
+                // Send processed event through callback
                 if let Some(ref callback) = output_callback {
-                    println!("📞 Вызываем output callback");
                     callback(processed_event.clone());
-                } else {
-                    println!("⚠️ Output callback не установлен");
                 }
                 
-                // Отправляем на выходные порты
+                // Send to output ports
                 let output_data = processed_event.to_midi_data();
                 
-                println!("📤 Готовимся отправить MIDI данные: {:?}", output_data);
-                println!("🔍 Начинаем обработку выходных портов...");
+                let send_time = std::time::Instant::now();
                 
-                // Отправляем на все подключенные выходные порты
+                // Send to all connected output ports
+                let mut sent_count = 0;
                 {
                     let mut port_manager = port_manager_for_callback.lock().unwrap();
-                    println!("🔍 Найдено выходных портов: {} (MUTEX ЗАХВАЧЕН)", port_manager.output_ports.len());
                     
-                    let mut sent_count = 0;
-                    
-                    for (port_id, output_port) in &mut port_manager.output_ports {
-                        println!("🔍 Проверяем порт '{}': подключен={}", port_id, output_port.is_connected());
-                        
+                    for (_port_id, output_port) in &mut port_manager.output_ports {
                         if output_port.is_connected() {
-                            println!("🎵 Отправляем данные на порт '{}'...", port_id);
-                            
                             match output_port.send_midi(&output_data) {
                                 Ok(_) => {
-                                    println!("✅ УСПЕХ: MIDI событие отправлено на порт '{}'", port_id);
                                     sent_count += 1;
                                 }
-                                Err(e) => {
-                                    println!("❌ ОШИБКА: Не удалось отправить на порт '{}': {}", port_id, e);
+                                Err(_) => {
+                                    // Silent error handling
                                 }
                             }
-                        } else {
-                            println!("⚠️ Порт '{}' НЕ подключен", port_id);
                         }
                     }
-                    
-                    println!("📊 Итог: успешно отправлено на {} портов из {}", sent_count, port_manager.output_ports.len());
                 }
                 
-                // Также обрабатываем через event processor для дополнительной логики
+                // Also process through event processor for additional logic
                 let _ = event_processor.lock().unwrap().process_midi_data(&output_data, timestamp);
-                println!("📊 Event processor обработал данные");
-            } else {
-                println!("❌ Ошибка парсинга MIDI данных: {:?}", data);
+                
+                let latency = send_time.duration_since(receive_time);
+                
+                
             }
-            
-            println!("🔚 Завершаем callback\n");
         }));
         
         // Создаем новый входной порт с callback
@@ -274,7 +252,6 @@ impl MidiManager {
         port_manager.set_input_port(input_port);
         self.input_enabled = true;
         
-        println!("🎹 Подключен входной порт: {}", port_name);
         Ok(())
     }
     
@@ -291,7 +268,6 @@ impl MidiManager {
         port_manager.set_output_port(output_port);
         self.output_enabled = true;
         
-        println!("🎵 Подключен выходной порт: {}", port_name);
         Ok(())
     }
     
@@ -303,7 +279,6 @@ impl MidiManager {
         self.input_enabled = false;
         self.output_enabled = false;
         
-        println!("🔌 Отключены все MIDI порты");
         Ok(())
     }
     
@@ -319,7 +294,6 @@ impl MidiManager {
         port_manager.input_ports.clear();
         self.input_enabled = false;
         
-        println!("🔌 Отключен входной MIDI порт");
         Ok(())
     }
     
@@ -335,7 +309,6 @@ impl MidiManager {
         port_manager.output_ports.clear();
         self.output_enabled = false;
         
-        println!("🔌 Отключен выходной MIDI порт");
         Ok(())
     }
     
@@ -363,11 +336,10 @@ impl MidiManager {
             if port.is_connected() {
                 match port.send_midi(data) {
                     Ok(_) => {
-                        println!("✅ MIDI сообщение отправлено на порт: {}", port_id);
                         sent = true;
                     }
-                    Err(e) => {
-                        eprintln!("❌ Ошибка отправки на порт {}: {}", port_id, e);
+                    Err(_) => {
+                        // Silent error handling
                     }
                 }
             }
@@ -385,17 +357,28 @@ impl MidiManager {
         self.is_running && (self.input_enabled || self.output_enabled)
     }
     
-    /// Применение кривой к velocity события
+    /// Применение соответствующих кривых к velocity событий
     fn process_velocity(
         event: MidiEvent,
-        curve_processor: &Arc<Mutex<crate::curve::BezierCurve>>
+        dual_curve_processor: &Arc<Mutex<crate::curve::DualCurve>>
     ) -> MidiEvent {
         match event {
             MidiEvent::NoteOn { channel, note, velocity, timestamp } => {
-                let mut curve = curve_processor.lock().unwrap();
-                let processed_velocity = curve.evaluate(velocity as f32) as u8;
+                let mut dual_curve = dual_curve_processor.lock().unwrap();
+                let processed_velocity = dual_curve.process_note_on_velocity(velocity);
                 
                 MidiEvent::NoteOn {
+                    channel,
+                    note,
+                    velocity: processed_velocity,
+                    timestamp,
+                }
+            }
+            MidiEvent::NoteOff { channel, note, velocity, timestamp } => {
+                let mut dual_curve = dual_curve_processor.lock().unwrap();
+                let processed_velocity = dual_curve.process_note_off_velocity(velocity);
+                
+                MidiEvent::NoteOff {
                     channel,
                     note,
                     velocity: processed_velocity,

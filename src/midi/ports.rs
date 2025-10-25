@@ -132,12 +132,8 @@ impl MidiInputPort {
             &port,
             "midi-curves-input",
             move |timestamp, data, callback_user_data| {
-                println!("📥 CALLBACK ВЫЗВАН В PORTS.RS с timestamp: {}, data: {:?}", timestamp, data);
-                
-                println!("📞 Вызываем пользовательский callback...");
                 let mut callback = callback_user_data.lock().unwrap();
                 callback(data, timestamp);
-                println!("✅ Пользовательский callback выполнен");
             },
             callback,
         )?;

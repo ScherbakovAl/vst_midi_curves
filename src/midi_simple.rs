@@ -1,7 +1,9 @@
 //! Упрощенная MIDI поддержка для базового тестирования
-//! 
+//!
 //! Это временная упрощенная версия для проверки основной MIDI функциональности
 //! без сложных зависимостей и обработки ошибок.
+//!
+//! Поддерживает отдельные кривые для NoteOn и NoteOff событий.
 
 use std::sync::{Arc, Mutex};
 
@@ -46,7 +48,7 @@ pub struct SimpleMidiStats {
 
 // Простой MIDI менеджер
 pub struct SimpleMidiManager {
-    curve_processor: Arc<Mutex<crate::curve::BezierCurve>>,
+    dual_curve_processor: Arc<Mutex<crate::curve::DualCurve>>,
     stats: SimpleMidiStats,
     input_ports: Vec<String>,
     output_ports: Vec<String>,
@@ -57,9 +59,9 @@ pub struct SimpleMidiManager {
 }
 
 impl SimpleMidiManager {
-    pub fn new(curve_processor: Arc<Mutex<crate::curve::BezierCurve>>) -> Self {
+    pub fn new(dual_curve_processor: Arc<Mutex<crate::curve::DualCurve>>) -> Self {
         Self {
-            curve_processor,
+            dual_curve_processor,
             stats: SimpleMidiStats::default(),
             input_ports: Vec::new(),
             output_ports: Vec::new(),
@@ -82,13 +84,11 @@ impl SimpleMidiManager {
     
     pub fn start(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         self.is_active = true;
-        println!("✅ Простой MIDI менеджер запущен");
         Ok(())
     }
     
     pub fn stop(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         self.is_active = false;
-        println!("🛑 Простой MIDI менеджер остановлен");
         Ok(())
     }
     
@@ -101,17 +101,14 @@ impl SimpleMidiManager {
     }
     
     pub fn connect_input_port(&mut self, _port_name: &str) -> Result<(), Box<dyn std::error::Error>> {
-        println!("🎹 Подключен входной порт: {}", _port_name);
         Ok(())
     }
     
     pub fn connect_output_port(&mut self, _port_name: &str) -> Result<(), Box<dyn std::error::Error>> {
-        println!("🎵 Подключен выходной порт: {}", _port_name);
         Ok(())
     }
     
     pub fn disconnect_all_ports(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        println!("🔌 Отключены все MIDI порты");
         Ok(())
     }
     
@@ -123,12 +120,12 @@ impl SimpleMidiManager {
         self.is_active
     }
     
-    pub fn process_midi_event(&mut self, event: &SimpleMidiEvent) -> Option<SimpleMidiEvent> {
+pub fn process_midi_event(&mut self, event: &SimpleMidiEvent) -> Option<SimpleMidiEvent> {
         let result = match event {
             SimpleMidiEvent::NoteOn { channel, note, velocity } => {
-                // Применяем кривую к velocity
-                let mut curve = self.curve_processor.lock().unwrap();
-                let processed_velocity = curve.evaluate(*velocity as f32) as u8;
+                // Применяем кривую NoteOn к velocity
+                let mut dual_curve = self.dual_curve_processor.lock().unwrap();
+                let processed_velocity = dual_curve.process_note_on_velocity(*velocity);
                 self.stats.note_on_count += 1;
                 
                 let processed_event = SimpleMidiEvent::NoteOn {
@@ -144,10 +141,24 @@ impl SimpleMidiManager {
                 
                 Some(processed_event)
             }
-            SimpleMidiEvent::NoteOff { channel: _, note: _, velocity: _ } => {
+            SimpleMidiEvent::NoteOff { channel, note, velocity } => {
+                // Применяем кривую NoteOff к velocity
+                let mut dual_curve = self.dual_curve_processor.lock().unwrap();
+                let processed_velocity = dual_curve.process_note_off_velocity(*velocity);
                 self.stats.note_off_count += 1;
+                
+                let processed_event = SimpleMidiEvent::NoteOff {
+                    channel: *channel,
+                    note: *note,
+                    velocity: processed_velocity,
+                };
+                
+                // Уведомляем о входящем событии
                 self.notify_callback(event);
-                Some(event.clone())
+                // Уведомляем об обработанном событии
+                self.notify_callback(&processed_event);
+                
+                Some(processed_event)
             }
             SimpleMidiEvent::ControlChange { channel: _, controller: _, value: _ } => {
                 self.stats.control_change_count += 1;
@@ -183,19 +194,32 @@ impl SimpleMidiManager {
         ];
     }
     
-    // Генерация тестового MIDI события
+// Генерация тестового MIDI события
     pub fn generate_test_event(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        let test_event = SimpleMidiEvent::NoteOn {
+        println!("🎵 Тестирование обеих кривых:");
+        
+        // Тестируем NoteOn событие
+        let note_on_event = SimpleMidiEvent::NoteOn {
             channel: 0,
             note: 60, // Middle C
             velocity: 64, // Средняя громкость
         };
         
-        println!("🎵 Генерация тестового MIDI события: {:?}", test_event);
+        println!("  NoteOn событие: {:?}", note_on_event);
+        if let Some(processed_note_on) = self.process_midi_event(&note_on_event) {
+            println!("  → Обработанное NoteOn: {:?}", processed_note_on);
+        }
         
-        // Обрабатываем событие через кривую
-        if let Some(processed_event) = self.process_midi_event(&test_event) {
-            println!("✅ Событие обработано: {:?}", processed_event);
+        // Тестируем NoteOff событие
+        let note_off_event = SimpleMidiEvent::NoteOff {
+            channel: 0,
+            note: 60,
+            velocity: 64,
+        };
+        
+        println!("  NoteOff событие: {:?}", note_off_event);
+        if let Some(processed_note_off) = self.process_midi_event(&note_off_event) {
+            println!("  → Обработанное NoteOff: {:?}", processed_note_off);
         }
         
         Ok(())

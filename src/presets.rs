@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::collections::HashMap;
 
 use crate::curve::ControlPoint;
+use crate::curve::DualCurve;
 
 /// Структура для сериализации пресета
 #[derive(Serialize, Deserialize, Clone)]
@@ -26,6 +27,111 @@ pub struct SerializableControlPoint {
     pub handle_out_y: f32,
 }
 
+/// Структура для сериализации пресета DualCurve (две кривые одновременно)
+#[derive(Serialize, Deserialize, Clone)]
+pub struct DualCurvePreset {
+    pub name: String,
+    pub description: String,
+    pub note_on_curve: Vec<SerializableControlPoint>,
+    pub note_off_curve: Vec<SerializableControlPoint>,
+}
+
+impl DualCurvePreset {
+    /// Создает новый пресет DualCurve из двух наборов контрольных точек
+    pub fn new(
+        name: String,
+        description: String,
+        note_on_points: Vec<ControlPoint>,
+        note_off_points: Vec<ControlPoint>,
+    ) -> Self {
+        let note_on_serializable = note_on_points.into_iter()
+            .map(|point| SerializableControlPoint {
+                x: point.position.0,
+                y: point.position.1,
+                handle_in_x: point.handle_in.0,
+                handle_in_y: point.handle_in.1,
+                handle_out_x: point.handle_out.0,
+                handle_out_y: point.handle_out.1,
+            })
+            .collect();
+            
+        let note_off_serializable = note_off_points.into_iter()
+            .map(|point| SerializableControlPoint {
+                x: point.position.0,
+                y: point.position.1,
+                handle_in_x: point.handle_in.0,
+                handle_in_y: point.handle_in.1,
+                handle_out_x: point.handle_out.0,
+                handle_out_y: point.handle_out.1,
+            })
+            .collect();
+            
+        Self {
+            name,
+            description,
+            note_on_curve: note_on_serializable,
+            note_off_curve: note_off_serializable,
+        }
+    }
+    
+    /// Преобразует пресет DualCurve в DualCurve структуру
+    pub fn to_dual_curve(&self) -> DualCurve {
+        let note_on_points = self.note_on_curve.iter()
+            .map(|point| ControlPoint {
+                position: (point.x, point.y),
+                handle_in: (point.handle_in_x, point.handle_in_y),
+                handle_out: (point.handle_out_x, point.handle_out_y),
+            })
+            .collect();
+            
+        let note_off_points = self.note_off_curve.iter()
+            .map(|point| ControlPoint {
+                position: (point.x, point.y),
+                handle_in: (point.handle_in_x, point.handle_in_y),
+                handle_out: (point.handle_out_x, point.handle_out_y),
+            })
+            .collect();
+            
+        DualCurve::from_points(note_on_points, note_off_points)
+    }
+    
+    /// Сохраняет пресет DualCurve в файл
+    pub fn save_to_file(&self, path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+        // Создаем директорию если она не существует
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        
+        let json = serde_json::to_string_pretty(self)?;
+        fs::write(path, json)?;
+        Ok(())
+    }
+    
+    /// Загружает пресет DualCurve из файла
+    pub fn load_from_file(path: &Path) -> Result<Self, Box<dyn std::error::Error>> {
+        let json = fs::read_to_string(path)?;
+        let preset = serde_json::from_str(&json)?;
+        Ok(preset)
+    }
+    
+    /// Возвращает путь к файлу пресета DualCurve
+    pub fn get_preset_file_path(&self) -> Result<PathBuf, Box<dyn std::error::Error>> {
+        let mut path = CurvePreset::get_presets_directory()?;
+        path.push(format!("dual_{}.json", self.sanitize_filename()));
+        Ok(path)
+    }
+    
+    /// Очищает имя файла от недопустимых символов
+    fn sanitize_filename(&self) -> String {
+        self.name
+            .chars()
+            .map(|c| match c {
+                '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
+                _ => c,
+            })
+            .collect()
+    }
+}
 impl CurvePreset {
     /// Создает новый пресет из имени и контрольных точек
     pub fn new(name: String, description: String, control_points: Vec<ControlPoint>) -> Self {
@@ -107,14 +213,15 @@ impl CurvePreset {
     }
 }
 
-/// Менеджер пресетов
+/// Менеджер пресетов с поддержкой обычных и DualCurve пресетов
 pub struct PresetManager {
     presets: HashMap<String, CurvePreset>,
+    dual_curve_presets: HashMap<String, DualCurvePreset>,
     presets_dir: PathBuf,
 }
 
 impl PresetManager {
-    /// Создает новый менеджер пресетов
+/// Создает новый менеджер пресетов
     pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
         let presets_dir = CurvePreset::get_presets_directory()?;
         
@@ -123,6 +230,7 @@ impl PresetManager {
         
         let mut manager = Self {
             presets: HashMap::new(),
+            dual_curve_presets: HashMap::new(),
             presets_dir,
         };
         
@@ -293,6 +401,7 @@ impl Default for PresetManager {
     fn default() -> Self {
         Self::new().unwrap_or_else(|_| Self {
             presets: HashMap::new(),
+            dual_curve_presets: HashMap::new(),
             presets_dir: PathBuf::new(),
         })
     }
