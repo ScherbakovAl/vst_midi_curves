@@ -276,7 +276,7 @@ impl GuiController {
         
         // Информация о выбранной точке
         if let Some(index) = self.gui_state.lock().unwrap().selected_point {
-            let mut curve = self.dual_curve_processor.lock().unwrap();
+            let curve = self.dual_curve_processor.lock().unwrap();
             if let Some(point) = curve.note_on_curve.control_points.get(index) {
                 ui.label(format!(
                     "🎯 Выбрана точка {}: ({:.1}, {:.1})",
@@ -400,7 +400,7 @@ impl GuiController {
             ui.label(format!("Версия: {}", env!("CARGO_PKG_VERSION")));
             ui.label("Платформа: VST3 Standalone");
             
-            let mut curve = self.dual_curve_processor.lock().unwrap();
+            let curve = self.dual_curve_processor.lock().unwrap();
             ui.label(format!("Контрольных точек: {}", curve.note_on_curve.control_points.len()));
         });
     }
@@ -562,7 +562,7 @@ impl GuiController {
     /// Поиск точки под курсором
     fn find_point_at(&self, screen_pos: egui::Pos2, rect: egui::Rect) -> Option<usize> {
         const CLICK_RADIUS: f32 = 12.0;
-        let mut curve = self.dual_curve_processor.lock().unwrap();
+        let curve = self.dual_curve_processor.lock().unwrap();
         for (i, point) in curve.note_on_curve.control_points.iter().enumerate() {
             let point_screen = self.world_to_screen(
                 egui::pos2(point.position.0, point.position.1),

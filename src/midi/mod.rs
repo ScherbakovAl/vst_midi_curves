@@ -7,7 +7,6 @@
 //! - Отправку обработанных событий на выходные порты
 
 use std::sync::{Arc, Mutex};
-use std::collections::HashMap;
 
 // Подмодули MIDI системы
 pub mod ports;
@@ -240,7 +239,7 @@ impl MidiManager {
                 // Also process through event processor for additional logic
                 let _ = event_processor.lock().unwrap().process_midi_data(&output_data, timestamp);
                 
-                let latency = send_time.duration_since(receive_time);
+                let _latency = send_time.duration_since(receive_time);
                 
                 
             }
@@ -332,7 +331,7 @@ impl MidiManager {
         let mut port_manager = self.port_manager.lock().unwrap();
         
         let mut sent = false;
-        for (port_id, port) in &mut port_manager.output_ports {
+        for (_port_id, port) in &mut port_manager.output_ports {
             if port.is_connected() {
                 match port.send_midi(data) {
                     Ok(_) => {

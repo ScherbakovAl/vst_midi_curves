@@ -10,7 +10,6 @@ use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 use std::error::Error;
 use midir::{MidiInput, MidiOutput, MidiInputConnection, MidiOutputConnection};
-use midir::Ignore;
 
 // Callback тип для входящих MIDI данных - упрощенный без Arc<Mutex<>>
 pub type MidiInputCallback = Arc<Mutex<dyn FnMut(&[u8], u64) + Send>>;

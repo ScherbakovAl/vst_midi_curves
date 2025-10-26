@@ -211,7 +211,7 @@ fn process_input_velocity(&self, input_velocity: u8) -> u8 {
     // Тестирование кривой
     fn test_curve(&mut self) {
         let input_velocity = 64; // Тестовое значение
-        let output_velocity = self.process_input_velocity(input_velocity);
+        let _output_velocity = self.process_input_velocity(input_velocity);
         // Velocity test completed silently
     }
     
@@ -322,9 +322,9 @@ fn process_input_velocity(&self, input_velocity: u8) -> u8 {
     
     // Тестирование MIDI обработки
     fn test_midi_processing(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        let mut midi_manager = self.midi_manager.lock().unwrap();
+        let _midi_manager = self.midi_manager.lock().unwrap();
         // Создаем тестовое MIDI событие
-        let test_event = MidiEvent::NoteOn {
+        let _test_event = MidiEvent::NoteOn {
             channel: 0,
             note: 60,
             velocity: 64,
@@ -1167,7 +1167,7 @@ fn main() -> Result<(), eframe::Error> {
         ..Default::default()
     };
     
-    let mut app = MidiCurvesApp::new().unwrap();
+    let app = MidiCurvesApp::new().unwrap();
     
     eframe::run_native(
         "VST MIDI Curves Plugin",

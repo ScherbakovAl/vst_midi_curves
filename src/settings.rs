@@ -4,10 +4,8 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::collections::HashMap;
 
 use crate::curve::{DualCurve, ControlPoint};
-use crate::presets::SerializableControlPoint;
 
 /// Структура для сохранения состояния контрольной точки
 #[derive(Serialize, Deserialize, Clone)]

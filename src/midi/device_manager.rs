@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 use midir::{MidiInput, MidiOutput};
-use super::ports::{MidiPortInfo, utils as port_utils};
+use super::ports::MidiPortInfo;
 
 // Информация о MIDI устройстве
 #[derive(Debug, Clone)]

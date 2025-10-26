@@ -7,7 +7,7 @@
 //! - Маршрутизацию MIDI событий
 
 use std::collections::HashMap;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 // События MIDI для внутренней обработки
 #[derive(Debug, Clone, PartialEq)]
