@@ -6,6 +6,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::curve::{DualCurve, ControlPoint};
+use crate::midi_simple::MidiMode;
 
 /// Структура для сохранения состояния контрольной точки
 #[derive(Serialize, Deserialize, Clone)]
@@ -34,6 +35,9 @@ pub struct AppSettings {
     
     /// GUI настройки
     pub active_curve_tab: i32, // 0 = NoteOn, 1 = NoteOff
+    
+    /// Режим работы MIDI (Standard/HighResolution) - опциональное поле для совместимости
+    pub midi_mode: Option<String>,
     
     /// Дополнительные настройки приложения
     pub auto_save_enabled: bool,
@@ -78,6 +82,7 @@ impl Default for AppSettings {
             ],
             last_preset: None,
             active_curve_tab: 0,
+            midi_mode: Some("Standard".to_string()),
             auto_save_enabled: true,
             show_advanced_controls: false,
         }
@@ -200,6 +205,23 @@ impl SettingsManager {
     /// Обновляет активную вкладку кривой
     pub fn update_active_curve_tab(&mut self, tab_index: i32) {
         self.settings.active_curve_tab = tab_index;
+    }
+    
+    /// Обновляет режим MIDI
+    pub fn set_midi_mode(&mut self, mode: &MidiMode) {
+        self.settings.midi_mode = Some(match mode {
+            MidiMode::Standard => "Standard".to_string(),
+            MidiMode::HighResolution => "HighResolution".to_string(),
+        });
+    }
+    
+    /// Получает текущий режим MIDI
+    pub fn get_midi_mode(&self) -> Option<MidiMode> {
+        match self.settings.midi_mode.as_ref().map(|s| s.as_str()) {
+            Some("Standard") => Some(MidiMode::Standard),
+            Some("HighResolution") => Some(MidiMode::HighResolution),
+            _ => Some(MidiMode::Standard), // По умолчанию стандартный режим
+        }
     }
     
     /// Обновляет дополнительные настройки GUI

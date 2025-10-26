@@ -2,6 +2,7 @@
 //!
 //! VST3 плагин для обработки MIDI velocity с настраиваемыми кривыми Безье
 //! Включает систему сохранения и загрузки настроек
+//! Поддерживает стандартный и hi-res MIDI режимы
 
 use std::sync::{Arc, Mutex};
 
@@ -9,7 +10,7 @@ use nih_plug::prelude::*;
 use nih_plug_egui::{EguiState, egui};
 
 use crate::curve::DualCurve;
-use crate::midi_simple::SimpleMidiManager;
+use crate::midi_simple::{SimpleMidiManager, MidiMode};
 use crate::presets::PresetManager;
 use crate::settings::SettingsManager;
 
@@ -44,6 +45,9 @@ struct MidiCurvesPlugin {
     
     /// Состояние GUI
     gui_state: Arc<Mutex<GuiState>>,
+    
+    /// Текущий режим работы MIDI (Standard/HighResolution)
+    current_midi_mode: MidiMode,
 }
 
 // Структура для GUI состояния
@@ -53,6 +57,7 @@ struct GuiController {
     preset_manager: Arc<Mutex<PresetManager>>,
     gui_state: Arc<Mutex<GuiState>>,
     settings_manager: SettingsManager,
+    current_midi_mode: Arc<Mutex<MidiMode>>,
 }
 
 // Состояние GUI для VST3 редактора
@@ -72,7 +77,18 @@ impl Default for MidiCurvesPlugin {
         let dual_curve_processor = Arc::new(Mutex::new(settings_manager.restore_to_dual_curve()));
         
         // Создаем MIDI менеджер
-        let midi_manager = Arc::new(Mutex::new(SimpleMidiManager::new(dual_curve_processor.clone())));
+        let mut midi_manager = SimpleMidiManager::new(dual_curve_processor.clone());
+        
+        // Восстанавливаем режим MIDI из настроек или используем стандартный
+        let midi_mode = settings_manager.get_midi_mode().unwrap_or_else(|| {
+            println!("⚠️ Режим MIDI не найден в настройках, используем стандартный");
+            MidiMode::Standard
+        });
+        
+        // Применяем режим к MIDI менеджеру
+        midi_manager.set_midi_mode(midi_mode.clone());
+        
+        let midi_manager = Arc::new(Mutex::new(midi_manager));
         
         // Создаем систему пресетов
         let preset_manager = Arc::new(Mutex::new(PresetManager::new().unwrap()));
@@ -83,12 +99,15 @@ impl Default for MidiCurvesPlugin {
             preset_manager.create_builtin_presets().unwrap();
         }
         
+        println!("🎵 MIDI Curves Plugin инициализирован в режиме: {:?}", midi_mode);
+        
         Self {
             dual_curve_processor,
             midi_manager,
             preset_manager,
             settings_manager: settings_manager.clone(),
             gui_state: Arc::new(Mutex::new(GuiState::default())),
+            current_midi_mode: midi_mode,
         }
     }
 }
@@ -125,12 +144,15 @@ impl Plugin for MidiCurvesPlugin {
 
 fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
     let egui_state = EguiState::from_size(1200, 800);
+    let current_midi_mode = Arc::new(Mutex::new(self.current_midi_mode.clone()));
+    
     let controller = GuiController {
         dual_curve_processor: self.dual_curve_processor.clone(),
         midi_manager: self.midi_manager.clone(),
         preset_manager: self.preset_manager.clone(),
         gui_state: self.gui_state.clone(),
         settings_manager: self.settings_manager.clone(),
+        current_midi_mode: current_midi_mode.clone(),
     };
     
     nih_plug_egui::create_egui_editor(
@@ -319,6 +341,51 @@ impl GuiController {
     
     /// Панель управления
     fn draw_control_panel(&self, ui: &mut egui::Ui) {
+        // Переключатель MIDI режима
+        ui.group(|ui| {
+            ui.label(egui::RichText::new("🎹 MIDI Mode").size(14.0));
+            
+            // Получаем копию текущего режима
+            let current_mode_value = {
+                let current_mode = self.current_midi_mode.lock().unwrap();
+                (*current_mode).clone()
+            };
+            
+            let mode_text = match current_mode_value {
+                MidiMode::Standard => "Standard MIDI (0-127)",
+                MidiMode::HighResolution => "Hi-Res MIDI (0-16383)",
+            };
+            
+            ui.label(format!("Current mode: {}", mode_text));
+            
+            ui.add_space(5.0);
+            
+            ui.horizontal(|ui| {
+                if ui.button("Standard").clicked() {
+                    self.switch_midi_mode(MidiMode::Standard);
+                }
+                
+                if ui.button("Hi-Res").clicked() {
+                    self.switch_midi_mode(MidiMode::HighResolution);
+                }
+            });
+            
+            ui.add_space(3.0);
+            
+            // Информация о режиме
+            match current_mode_value {
+                MidiMode::Standard => {
+                    ui.label(egui::RichText::new("📝 Standard mode: Velocity 0-127").small());
+                }
+                MidiMode::HighResolution => {
+                    ui.label(egui::RichText::new("🎯 Hi-Res mode: Velocity 0-16383").small());
+                    ui.label(egui::RichText::new("⚡ Uses CC#01 (MSB) + CC#33 (LSB)").small());
+                }
+            }
+        });
+        
+        ui.add_space(10.0);
+        
         // Тест кривой
         ui.group(|ui| {
             ui.label(egui::RichText::new("🎯 Тест кривой").size(14.0));
@@ -619,6 +686,40 @@ impl GuiController {
             settings_manager.save()
         } else {
             Ok(())
+        }
+    }
+    
+    /// Переключение MIDI режима
+    fn switch_midi_mode(&self, new_mode: MidiMode) {
+        // Обновляем режим в плагине
+        {
+            let mut midi_manager = self.midi_manager.lock().unwrap();
+            midi_manager.set_midi_mode(new_mode.clone());
+        }
+        
+        // Обновляем отображение в GUI
+        {
+            let mut current_mode = self.current_midi_mode.lock().unwrap();
+            *current_mode = new_mode.clone();
+        }
+        
+        // Обновляем настройки
+        let mut settings_manager = self.settings_manager.clone();
+        settings_manager.set_midi_mode(&new_mode);
+        
+        // Автосохранение настроек
+        if let Err(e) = settings_manager.save() {
+            eprintln!("Ошибка сохранения режима MIDI: {}", e);
+        }
+        
+        println!("🎹 MIDI режим изменен на: {:?}", new_mode);
+        
+        // Тестируем новый режим если это hi-res
+        if let MidiMode::HighResolution = new_mode {
+            let mut midi_manager = self.midi_manager.lock().unwrap();
+            if let Err(e) = midi_manager.generate_hi_res_test() {
+                eprintln!("Ошибка тестирования hi-res MIDI: {}", e);
+            }
         }
     }
 }

@@ -17,6 +17,7 @@ mod settings;
 use curve::DualCurve;
 use presets::{PresetManager, CurvePreset};
 use midi::{MidiManager, MidiEvent, MidiStats};
+use midi_simple::MidiMode;
 use settings::SettingsManager;
 use egui::{Pos2, Rect, Sense, Response, Painter, Color32, Stroke};
 
@@ -41,6 +42,9 @@ struct MidiCurvesApp {
     selected_input_port: Option<String>,
     selected_output_port: Option<String>,
     midi_stats: MidiStats,
+    
+    // Текущий MIDI режим (Standard/HighResolution)
+    current_midi_mode: Arc<Mutex<MidiMode>>,
     
     // Состояние интерфейса
     selected_point: Option<usize>,
@@ -75,6 +79,11 @@ fn new() -> Result<Self, Box<dyn std::error::Error>> {
         // Восстанавливаем DualCurve из настроек или создаем новый
         let dual_curve_processor = Arc::new(Mutex::new(settings_manager.restore_to_dual_curve()));
         
+        // Восстанавливаем MIDI режим из настроек
+        let current_midi_mode = Arc::new(Mutex::new(
+            settings_manager.get_midi_mode().unwrap_or(MidiMode::Standard)
+        ));
+        
         // Инициализируем приложение
         let mut app = Self {
             dual_curve: dual_curve_processor.clone(),
@@ -85,6 +94,7 @@ fn new() -> Result<Self, Box<dyn std::error::Error>> {
             selected_output_port: None,
             midi_stats: MidiStats::new(),
             
+            current_midi_mode: current_midi_mode.clone(),
             selected_point: None,
             is_dragging: false,
             drag_start: None,
@@ -182,6 +192,12 @@ fn new() -> Result<Self, Box<dyn std::error::Error>> {
         // Обновляем последний пресет
         self.settings_manager.update_last_preset(self.selected_preset.clone());
         
+        // Обновляем MIDI режим
+        {
+            let current_mode = self.current_midi_mode.lock().unwrap();
+            self.settings_manager.set_midi_mode(&*current_mode);
+        }
+        
         // Сохраняем настройки в файл
         self.settings_manager.save()
     }
@@ -193,6 +209,20 @@ fn new() -> Result<Self, Box<dyn std::error::Error>> {
                 eprintln!("Ошибка автосохранения настроек: {}", e);
             }
         }
+    }
+    
+    /// Переключает MIDI режим
+    fn switch_midi_mode(&mut self, new_mode: MidiMode) {
+        {
+            let mut current_mode = self.current_midi_mode.lock().unwrap();
+            *current_mode = new_mode.clone();
+        }
+        
+        // Обновляем режим в настройках и сохраняем
+        self.settings_manager.set_midi_mode(&new_mode);
+        self.auto_save_settings();
+        
+        println!("Переключен MIDI режим на: {:?}", new_mode);
     }
     
     /// Вызывается при закрытии приложения для сохранения настроек
@@ -562,7 +592,7 @@ impl MidiCurvesApp {
     fn draw_main_ui(&mut self, ui: &mut egui::Ui) {
         // Заголовок приложения
         ui.horizontal(|ui| {
-            ui.label(egui::RichText::new("🎵 VST MIDI Curves Plugin - Dual Curves").size(18.0));
+            ui.label(egui::RichText::new("🎵 MIDI Curves Plugin - Dual Curves").size(18.0));
         });
         
         ui.add_space(10.0);
@@ -704,6 +734,16 @@ impl MidiCurvesApp {
                 // Добавляем отступ для выравнивания с заголовком графика
                 ui.add_space(31.0);
                 
+                // MIDI режим панель
+                egui::Frame::group(ui.style())
+                    .fill(egui::Color32::from_gray(30))
+                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(60)))
+                    .show(ui, |ui| {
+                        self.draw_midi_mode_panel(ui);
+                    });
+                
+                ui.add_space(10.0);
+                
                 // MIDI панель
                 egui::Frame::group(ui.style())
                     .fill(egui::Color32::from_gray(30))
@@ -828,6 +868,49 @@ impl MidiCurvesApp {
                     }
                 }
             });
+    }
+    
+    fn draw_midi_mode_panel(&mut self, ui: &mut egui::Ui) {
+        ui.label(egui::RichText::new("🎹 MIDI Mode").size(12.0));
+        ui.add_space(3.0);
+        
+        // Получаем копию текущего режима
+        let current_mode_value = {
+            let current_mode = self.current_midi_mode.lock().unwrap();
+            (*current_mode).clone()
+        };
+        
+        let mode_text = match current_mode_value {
+            MidiMode::Standard => "Standard MIDI (0-127)",
+            MidiMode::HighResolution => "Hi-Res MIDI (0-16383)",
+        };
+        
+        ui.label(format!("Current mode: {}", mode_text));
+        
+        ui.add_space(5.0);
+        
+        ui.horizontal(|ui| {
+            if ui.button("Standard").clicked() {
+                self.switch_midi_mode(MidiMode::Standard);
+            }
+            
+            if ui.button("Hi-Res").clicked() {
+                self.switch_midi_mode(MidiMode::HighResolution);
+            }
+        });
+        
+        ui.add_space(3.0);
+        
+        // Информация о режиме
+        match current_mode_value {
+            MidiMode::Standard => {
+                ui.label(egui::RichText::new("📝 Standard mode: Velocity 0-127").small());
+            }
+            MidiMode::HighResolution => {
+                ui.label(egui::RichText::new("🎯 Hi-Res mode: Velocity 0-16383").small());
+                ui.label(egui::RichText::new("⚡ Uses CC#01 (MSB) + CC#33 (LSB)").small());
+            }
+        }
     }
     
     fn draw_midi_panel(&mut self, ui: &mut egui::Ui) {
@@ -1160,7 +1243,7 @@ fn main() -> Result<(), eframe::Error> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1000.0, 600.0])
-            .with_title("VST MIDI Curves Plugin - Beta")
+            .with_title("MIDI Curves Plugin - Beta")
             .with_resizable(true)
             .with_fullscreen(false)
             .with_decorations(true),
@@ -1170,7 +1253,7 @@ fn main() -> Result<(), eframe::Error> {
     let app = MidiCurvesApp::new().unwrap();
     
     eframe::run_native(
-        "VST MIDI Curves Plugin",
+        "MIDI Curves Plugin",
         options,
         Box::new(move |_cc| {
             Ok(Box::new(app))
