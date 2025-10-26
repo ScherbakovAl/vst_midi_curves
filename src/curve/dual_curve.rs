@@ -39,6 +39,26 @@ impl DualCurve {
     pub fn process_note_off_velocity(&mut self, input_velocity: u8) -> u8 {
         self.note_off_curve.evaluate(input_velocity as f32) as u8
     }
+    
+    /// Обрабатывает нормализованную velocity (0.0-1.0) для NoteOn событий
+    pub fn process_note_on_velocity_float(&mut self, input_velocity: f32) -> f32 {
+        // Нормализуем входное значение к диапазону кривой (0-127)
+        let input_7bit = (input_velocity * 127.0).clamp(0.0, 127.0);
+        // Применяем кривую
+        let output_7bit = self.note_on_curve.evaluate(input_7bit);
+        // Денормализуем обратно к диапазону 0.0-1.0
+        (output_7bit / 127.0).clamp(0.0, 1.0)
+    }
+    
+    /// Обрабатывает нормализованную velocity (0.0-1.0) для NoteOff событий
+    pub fn process_note_off_velocity_float(&mut self, input_velocity: f32) -> f32 {
+        // Нормализуем входное значение к диапазону кривой (0-127)
+        let input_7bit = (input_velocity * 127.0).clamp(0.0, 127.0);
+        // Применяем кривую
+        let output_7bit = self.note_off_curve.evaluate(input_7bit);
+        // Денормализуем обратно к диапазону 0.0-1.0
+        (output_7bit / 127.0).clamp(0.0, 1.0)
+    }
 
     /// Сбрасывает обе кривые к линейным
     pub fn reset_to_linear(&mut self) {

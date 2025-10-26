@@ -295,7 +295,16 @@ mod tests {
     
     #[test]
     fn test_settings_creation() {
-        let manager = SettingsManager::default();
+        // Создаем временную директорию для тестов
+        let temp_dir = TempDir::new().unwrap();
+        let temp_path = temp_dir.path().join("settings.json");
+        
+        // Создаем настройки с временным путем
+        let manager = SettingsManager {
+            settings: AppSettings::default(),
+            settings_path: temp_path,
+        };
+        
         assert!(manager.get_last_input_port().is_none());
         assert!(manager.get_last_output_port().is_none());
         assert_eq!(manager.get_active_curve_tab(), 0);
@@ -324,7 +333,7 @@ mod tests {
     
     #[test]
     fn test_dual_curve_save_restore() {
-        use crate::curve::{DualCurve, ControlPoint};
+        use crate::curve::DualCurve;
         
         let mut manager = SettingsManager::default();
         

@@ -1,4 +1,4 @@
-//! MIDI менеджер для обработки MIDI событий и коммуникации с внешними устройствами
+//! MIDI менеджер для обработки MIDI событий и коммуникации с внешними устройства
 //! 
 //! Этот модуль отвечает за:
 //! - Обнаружение и управление MIDI портами
@@ -46,6 +46,28 @@ pub enum MidiEvent {
     PitchBend {
         channel: u8,
         value: u16,
+        timestamp: std::time::Instant,
+    },
+    // Hi-res MIDI события
+    HiResNoteOn {
+        channel: u8,
+        note: u8,
+        velocity_msb: u8,
+        velocity_lsb: u8,
+        timestamp: std::time::Instant,
+    },
+    HiResNoteOff {
+        channel: u8,
+        note: u8,
+        velocity_msb: u8,
+        velocity_lsb: u8,
+        timestamp: std::time::Instant,
+    },
+    HiResControlChange {
+        channel: u8,
+        controller: u8,
+        value_msb: u8,
+        value_lsb: u8,
         timestamp: std::time::Instant,
     },
     // Системные события
@@ -194,55 +216,15 @@ impl MidiManager {
         let port_manager_for_callback = Arc::clone(&self.port_manager);
         
         let callback = Arc::new(Mutex::new(move |data: &[u8], timestamp: u64| {
-            let receive_time = std::time::Instant::now();
-            
-            // Parse MIDI data
-            if let Ok(midi_event) = MidiEvent::from_midi_data(data, timestamp) {
-                // Update statistics
-                {
-                    let mut stats_mut = stats.lock().unwrap();
-                    Self::update_stats(&midi_event, &mut stats_mut);
-                }
-                
-                // Process through dual velocity curves
-                let processed_event = Self::process_velocity(midi_event, &dual_curve_processor);
-                
-                // Send processed event through callback
-                if let Some(ref callback) = output_callback {
-                    callback(processed_event.clone());
-                }
-                
-                // Send to output ports
-                let output_data = processed_event.to_midi_data();
-                
-                let send_time = std::time::Instant::now();
-                
-                // Send to all connected output ports
-                let mut sent_count = 0;
-                {
-                    let mut port_manager = port_manager_for_callback.lock().unwrap();
-                    
-                    for (_port_id, output_port) in &mut port_manager.output_ports {
-                        if output_port.is_connected() {
-                            match output_port.send_midi(&output_data) {
-                                Ok(_) => {
-                                    sent_count += 1;
-                                }
-                                Err(_) => {
-                                    // Silent error handling
-                                }
-                            }
-                        }
-                    }
-                }
-                
-                // Also process through event processor for additional logic
-                let _ = event_processor.lock().unwrap().process_midi_data(&output_data, timestamp);
-                
-                let _latency = send_time.duration_since(receive_time);
-                
-                
-            }
+            Self::process_midi_input(
+                data,
+                timestamp,
+                &dual_curve_processor,
+                &event_processor,
+                &stats,
+                &output_callback,
+                &port_manager_for_callback,
+            );
         }));
         
         // Создаем новый входной порт с callback
@@ -356,6 +338,113 @@ impl MidiManager {
         self.is_running && (self.input_enabled || self.output_enabled)
     }
     
+    /// Обработка входящего MIDI сообщения
+    fn process_midi_input(
+        data: &[u8],
+        timestamp: u64,
+        dual_curve_processor: &Arc<Mutex<crate::curve::DualCurve>>,
+        event_processor: &Arc<Mutex<MidiEventProcessor>>,
+        stats: &Arc<Mutex<MidiStats>>,
+        output_callback: &Option<MidiEventCallback>,
+        port_manager: &Arc<Mutex<MidiPortManager>>,
+    ) {
+        if data.len() < 3 {
+            return;
+        }
+        
+        let status = data[0];
+        let controller = data[1];
+        let value = data[2];
+        
+        // Проверяем hi-res MIDI сообщения
+        if status == 0xB9 && controller == 88 { // CC#88 + LSB на канале 9
+            // Первое сообщение hi-res: дробная часть velocity
+            
+            // Обрабатываем как HiResControlChange
+            let hi_res_event = MidiEvent::HiResControlChange {
+                channel: status & 0x0F,
+                controller: 88, // CC#88
+                value_msb: 0, // Будет заполнено из следующего сообщения
+                value_lsb: value,
+                timestamp: std::time::Instant::now(),
+            };
+            
+            let processed_event = Self::process_velocity(hi_res_event, dual_curve_processor);
+            Self::send_processed_event(&processed_event, output_callback, port_manager);
+            
+            // Обновляем статистику
+            {
+                let mut stats_mut = stats.lock().unwrap();
+                stats_mut.control_change_count += 1;
+            }
+            
+        } else if status == 0x99 && data.len() == 3 { // NoteOn на канале 9
+            // Второе сообщение hi-res: NoteOn с цельной частью velocity
+            let note = data[1];
+            let velocity_msb = data[2];
+            
+            // Создаем hi-res NoteOn событие
+            let hi_res_event = MidiEvent::HiResNoteOn {
+                channel: status & 0x0F,
+                note: note,
+                velocity_msb: velocity_msb,
+                velocity_lsb: 0, // Будет заполнено из предыдущего CC сообщения
+                timestamp: std::time::Instant::now(),
+            };
+            
+            let processed_event = Self::process_velocity(hi_res_event, dual_curve_processor);
+            Self::send_processed_event(&processed_event, output_callback, port_manager);
+            
+            // Обновляем статистику
+            {
+                let mut stats_mut = stats.lock().unwrap();
+                stats_mut.note_on_count += 1;
+            }
+            
+        } else {
+            // Обычное MIDI сообщение
+            if let Ok(midi_event) = MidiEvent::from_midi_data(data, timestamp) {
+                let processed_event = Self::process_velocity(midi_event, dual_curve_processor);
+                Self::send_processed_event(&processed_event, output_callback, port_manager);
+                
+                // Обновляем статистику
+                {
+                    let mut stats_mut = stats.lock().unwrap();
+                    Self::update_stats(&processed_event, &mut stats_mut);
+                }
+            }
+        }
+        
+        // Также обрабатываем через event processor для дополнительной логики
+        if let Ok(midi_event) = MidiEvent::from_midi_data(data, timestamp) {
+            let processed_event = Self::process_velocity(midi_event, dual_curve_processor);
+            let output_data = processed_event.to_midi_data();
+            let _ = event_processor.lock().unwrap().process_midi_data(&output_data, timestamp);
+        }
+    }
+    
+    /// Отправка обработанного события
+    fn send_processed_event(
+        event: &MidiEvent,
+        output_callback: &Option<MidiEventCallback>,
+        port_manager: &Arc<Mutex<MidiPortManager>>,
+    ) {
+        // Отправляем через callback
+        if let Some(ref callback) = *output_callback {
+            callback(event.clone());
+        }
+        
+        // Отправляем на выходные порты
+        let output_data = event.to_midi_data();
+        
+        let mut port_manager = port_manager.lock().unwrap();
+        for (_port_id, output_port) in &mut port_manager.output_ports {
+            if output_port.is_connected() {
+                let _ = output_port.send_midi(&output_data);
+            }
+        }
+    }
+    
     /// Применение соответствующих кривых к velocity событий
     fn process_velocity(
         event: MidiEvent,
@@ -381,6 +470,77 @@ impl MidiManager {
                     channel,
                     note,
                     velocity: processed_velocity,
+                    timestamp,
+                }
+            }
+            // Hi-Res MIDI обработка - обрабатываем дробную часть через кривую!
+            MidiEvent::HiResNoteOn { channel, note, velocity_msb, velocity_lsb, timestamp } => {
+                let mut dual_curve = dual_curve_processor.lock().unwrap();
+                
+                // Объединяем MSB и LSB для получения 14-битного значения
+                let combined_velocity = ((velocity_msb as u16) << 7) | (velocity_lsb as u16);
+                
+                // Нормализуем к 0-1, обрабатываем через кривую, восстанавливаем к 14-битному
+                let normalized_input = combined_velocity as f32 / 16383.0;
+                let normalized_output = dual_curve.note_on_curve.evaluate(normalized_input);
+                let processed_combined = (normalized_output * 16383.0).round() as u16;
+                
+                // Разделяем обратно на MSB и LSB
+                let processed_msb = (processed_combined >> 7) as u8;
+                let processed_lsb = (processed_combined & 0x7F) as u8;
+                
+                MidiEvent::HiResNoteOn {
+                    channel,
+                    note,
+                    velocity_msb: processed_msb,
+                    velocity_lsb: processed_lsb,
+                    timestamp,
+                }
+            }
+            MidiEvent::HiResNoteOff { channel, note, velocity_msb, velocity_lsb, timestamp } => {
+                let mut dual_curve = dual_curve_processor.lock().unwrap();
+                
+                // Объединяем MSB и LSB для получения 14-битного значения
+                let combined_velocity = ((velocity_msb as u16) << 7) | (velocity_lsb as u16);
+                
+                // Нормализуем к 0-1, обрабатываем через кривую, восстанавливаем к 14-битному
+                let normalized_input = combined_velocity as f32 / 16383.0;
+                let normalized_output = dual_curve.note_off_curve.evaluate(normalized_input);
+                let processed_combined = (normalized_output * 16383.0).round() as u16;
+                
+                // Разделяем обратно на MSB и LSB
+                let processed_msb = (processed_combined >> 7) as u8;
+                let processed_lsb = (processed_combined & 0x7F) as u8;
+                
+                MidiEvent::HiResNoteOff {
+                    channel,
+                    note,
+                    velocity_msb: processed_msb,
+                    velocity_lsb: processed_lsb,
+                    timestamp,
+                }
+            }
+            MidiEvent::HiResControlChange { channel, controller, value_msb, value_lsb, timestamp } => {
+                // Hi-res Control Change тоже обрабатываем через кривую
+                let mut dual_curve = dual_curve_processor.lock().unwrap();
+                
+                // Объединяем MSB и LSB для получения 14-битного значения
+                let combined_value = ((value_msb as u16) << 7) | (value_lsb as u16);
+                
+                // Нормализуем к 0-1, обрабатываем через кривую, восстанавливаем к 14-битному
+                let normalized_input = combined_value as f32 / 16383.0;
+                let normalized_output = dual_curve.note_on_curve.evaluate(normalized_input); // Используем NoteOn кривую для CC
+                let processed_combined = (normalized_output * 16383.0).round() as u16;
+                
+                // Разделяем обратно на MSB и LSB
+                let processed_msb = (processed_combined >> 7) as u8;
+                let processed_lsb = (processed_combined & 0x7F) as u8;
+                
+                MidiEvent::HiResControlChange {
+                    channel,
+                    controller,
+                    value_msb: processed_msb,
+                    value_lsb: processed_lsb,
                     timestamp,
                 }
             }
@@ -516,6 +676,28 @@ impl MidiEvent {
             }
             MidiEvent::PitchBend { channel, value, .. } => {
                 vec![0xE0 | (channel & 0x0F), (value & 0x7F) as u8, ((value >> 7) & 0x7F) as u8]
+            }
+            // Hi-res MIDI события - генерируем соответствующие сообщения
+            MidiEvent::HiResNoteOn { channel, note, velocity_msb, velocity_lsb, .. } => {
+                // Генерируем два сообщения: NoteOn + CC для дробной части
+                vec![
+                    0x90 | (channel & 0x0F), *note, *velocity_msb,
+                    0xB0 | (channel & 0x0F), 88, *velocity_lsb
+                ]
+            }
+            MidiEvent::HiResNoteOff { channel, note, velocity_msb, velocity_lsb, .. } => {
+                // Генерируем два сообщения: NoteOff + CC для дробной части
+                vec![
+                    0x80 | (channel & 0x0F), *note, *velocity_msb,
+                    0xB0 | (channel & 0x0F), 88, *velocity_lsb
+                ]
+            }
+            MidiEvent::HiResControlChange { channel, controller, value_msb, value_lsb, .. } => {
+                // Генерируем два CC сообщения
+                vec![
+                    0xB0 | (channel & 0x0F), *controller, *value_msb,
+                    0xB0 | (channel & 0x0F), 33, *value_lsb
+                ]
             }
             MidiEvent::Start => vec![0xFA],
             MidiEvent::Stop => vec![0xFC],

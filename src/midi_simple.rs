@@ -180,21 +180,73 @@ impl SimpleMidiManager {
     /// Обработка ControlChange сообщения для hi-res MIDI
     pub fn process_control_change(&mut self, channel: u8, controller: u8, value: u8) -> Option<HiResMidiEvent> {
         match (controller, self.current_mode.clone()) {
-            (0x01, MidiMode::HighResolution) => {
-                // CC#01 (MSB) для Velocity
-                self.hi_res_buffer.msb_velocity = Some(value);
+            (0x58, MidiMode::HighResolution) => {
+                // CC#88 (Fractional Velocity) - дробная часть velocity
+                self.hi_res_buffer.lsb_velocity = Some(value);
                 self.hi_res_buffer.last_channel = channel;
                 
-                // Если у нас есть и MSB и LSB, создаем hi-res событие
+                // Если у нас есть и целая и дробная части, создаем hi-res событие
                 if let (Some(msb), Some(lsb)) = (self.hi_res_buffer.msb_velocity, self.hi_res_buffer.lsb_velocity) {
                     let velocity = ((msb as u16) << 7) | (lsb as u16);
+                    let note = 60; // Middle C по умолчанию
+                    
                     self.hi_res_buffer.msb_velocity = None;
                     self.hi_res_buffer.lsb_velocity = None;
                     
                     self.stats.hi_res_note_on_count += 1;
                     let hi_res_event = HiResMidiEvent::HiResNoteOn {
                         channel,
-                        note: 60, // Middle C по умолчанию
+                        note,
+                        velocity,
+                    };
+                    self.notify_hi_res_callback(&hi_res_event);
+                    Some(hi_res_event)
+                } else {
+                    Some(HiResMidiEvent::ControlChangeLSB { channel, controller, value })
+                }
+            }
+            (0x70, MidiMode::HighResolution) => {
+                // CC#112 (Integer Velocity) - целая часть velocity
+                self.hi_res_buffer.msb_velocity = Some(value);
+                self.hi_res_buffer.last_channel = channel;
+                
+                // Если у нас есть и целая и дробная части, создаем hi-res событие
+                if let (Some(msb), Some(lsb)) = (self.hi_res_buffer.msb_velocity, self.hi_res_buffer.lsb_velocity) {
+                    let velocity = ((msb as u16) << 7) | (lsb as u16);
+                    let note = 60; // Middle C по умолчанию
+                    
+                    self.hi_res_buffer.msb_velocity = None;
+                    self.hi_res_buffer.lsb_velocity = None;
+                    
+                    self.stats.hi_res_note_on_count += 1;
+                    let hi_res_event = HiResMidiEvent::HiResNoteOn {
+                        channel,
+                        note,
+                        velocity,
+                    };
+                    self.notify_hi_res_callback(&hi_res_event);
+                    Some(hi_res_event)
+                } else {
+                    Some(HiResMidiEvent::ControlChangeMSB { channel, controller, value })
+                }
+            }
+            (0x01, MidiMode::HighResolution) => {
+                // CC#01 (MSB) для Velocity (альтернативный стандарт)
+                self.hi_res_buffer.msb_velocity = Some(value);
+                self.hi_res_buffer.last_channel = channel;
+                
+                // Если у нас есть и MSB и LSB, создаем hi-res событие
+                if let (Some(msb), Some(lsb)) = (self.hi_res_buffer.msb_velocity, self.hi_res_buffer.lsb_velocity) {
+                    let velocity = ((msb as u16) << 7) | (lsb as u16);
+                    let note = 60; // Middle C по умолчанию
+                    
+                    self.hi_res_buffer.msb_velocity = None;
+                    self.hi_res_buffer.lsb_velocity = None;
+                    
+                    self.stats.hi_res_note_on_count += 1;
+                    let hi_res_event = HiResMidiEvent::HiResNoteOn {
+                        channel,
+                        note,
                         velocity,
                     };
                     self.notify_hi_res_callback(&hi_res_event);
@@ -204,66 +256,22 @@ impl SimpleMidiManager {
                 }
             }
             (0x21, MidiMode::HighResolution) => {
-                // CC#33 (LSB) для Velocity
+                // CC#33 (LSB) для Velocity (альтернативный стандарт)
                 self.hi_res_buffer.lsb_velocity = Some(value);
                 self.hi_res_buffer.last_channel = channel;
                 
                 // Если у нас есть и MSB и LSB, создаем hi-res событие
                 if let (Some(msb), Some(lsb)) = (self.hi_res_buffer.msb_velocity, self.hi_res_buffer.lsb_velocity) {
                     let velocity = ((msb as u16) << 7) | (lsb as u16);
+                    let note = 60; // Middle C по умолчанию
+                    
                     self.hi_res_buffer.msb_velocity = None;
                     self.hi_res_buffer.lsb_velocity = None;
                     
                     self.stats.hi_res_note_on_count += 1;
                     let hi_res_event = HiResMidiEvent::HiResNoteOn {
                         channel,
-                        note: 60, // Middle C по умолчанию
-                        velocity,
-                    };
-                    self.notify_hi_res_callback(&hi_res_event);
-                    Some(hi_res_event)
-                } else {
-                    Some(HiResMidiEvent::ControlChangeLSB { channel, controller, value })
-                }
-            }
-            (0x07, MidiMode::HighResolution) => {
-                // CC#07 (MSB) для Volume как альтернатива
-                self.hi_res_buffer.msb_velocity = Some(value);
-                self.hi_res_buffer.last_channel = channel;
-                
-                // Если у нас есть и MSB и LSB, создаем hi-res событие
-                if let (Some(msb), Some(lsb)) = (self.hi_res_buffer.msb_velocity, self.hi_res_buffer.lsb_velocity) {
-                    let velocity = ((msb as u16) << 7) | (lsb as u16);
-                    self.hi_res_buffer.msb_velocity = None;
-                    self.hi_res_buffer.lsb_velocity = None;
-                    
-                    self.stats.hi_res_note_on_count += 1;
-                    let hi_res_event = HiResMidiEvent::HiResNoteOn {
-                        channel,
-                        note: 60, // Middle C по умолчанию
-                        velocity,
-                    };
-                    self.notify_hi_res_callback(&hi_res_event);
-                    Some(hi_res_event)
-                } else {
-                    Some(HiResMidiEvent::ControlChangeMSB { channel, controller, value })
-                }
-            }
-            (0x27, MidiMode::HighResolution) => {
-                // CC#39 (LSB) для Volume как альтернатива
-                self.hi_res_buffer.lsb_velocity = Some(value);
-                self.hi_res_buffer.last_channel = channel;
-                
-                // Если у нас есть и MSB и LSB, создаем hi-res событие
-                if let (Some(msb), Some(lsb)) = (self.hi_res_buffer.msb_velocity, self.hi_res_buffer.lsb_velocity) {
-                    let velocity = ((msb as u16) << 7) | (lsb as u16);
-                    self.hi_res_buffer.msb_velocity = None;
-                    self.hi_res_buffer.lsb_velocity = None;
-                    
-                    self.stats.hi_res_note_on_count += 1;
-                    let hi_res_event = HiResMidiEvent::HiResNoteOn {
-                        channel,
-                        note: 60, // Middle C по умолчанию
+                        note,
                         velocity,
                     };
                     self.notify_hi_res_callback(&hi_res_event);
@@ -284,15 +292,81 @@ impl SimpleMidiManager {
     }
     
     /// Обработка velocity в hi-res режиме
-    fn process_hi_res_velocity(&mut self, velocity: u16) -> u16 {
-        // Конвертируем в диапазон кривой (0-127) для применения кривой, затем обратно
-        let velocity_7bit = (velocity >> 7) as u8; // Делим на 128
+    pub fn process_hi_res_velocity(&mut self, velocity: u16) -> u16 {
+        // Правильная обработка hi-res velocity (0-16383):
+        // Применяем кривую напрямую к 14-битному диапазону без потери точности
         
         let mut dual_curve = self.dual_curve_processor.lock().unwrap();
-        let processed_velocity_7bit = dual_curve.process_note_on_velocity(velocity_7bit);
         
-        // Конвертируем обратно в 14-bit
-        (processed_velocity_7bit as u16) << 7
+        // Для линейной кривой сохраняем значение точно
+        // Проверяем, является ли кривая линейной (только начальная и конечная точки)
+        if dual_curve.note_on_curve.control_points.len() == 2 {
+            // Точная проверка на линейность: только (0,0) и (127,127)
+            let is_linear = dual_curve.note_on_curve.control_points[0].position.0 == 0.0 &&
+                           dual_curve.note_on_curve.control_points[0].position.1 == 0.0 &&
+                           dual_curve.note_on_curve.control_points[1].position.0 == 127.0 &&
+                           dual_curve.note_on_curve.control_points[1].position.1 == 127.0;
+            
+            if is_linear {
+                return velocity; // Сохраняем точное значение для линейной кривой
+            }
+        }
+        
+        // Для нелинейных кривых применяем их напрямую к 14-битному диапазону
+        // Масштабируем 14-битное значение (0-16383) к диапазону кривой (0-127)
+        let velocity_7bit = (velocity as f32 / 16383.0 * 127.0).clamp(0.0, 127.0);
+        
+        // Применяем кривую Безье к 7-битному значению
+        let processed_7bit = dual_curve.note_on_curve.evaluate(velocity_7bit);
+        
+        // Восстанавливаем обратно к 14-битному диапазону
+        let processed_velocity = (processed_7bit as f32 / 127.0 * 16383.0).round() as u16;
+        
+        processed_velocity
+    }
+    
+    /// Генерация двух MIDI сообщений из обработанного hi-res velocity
+    /// Согласно описанию:
+    /// Первое сообщение: 9, 176, 88, fractional_part (дробная часть скорости)
+    /// Второе сообщение: 9, 144, note, integer_part (цельная часть скорости)
+    pub fn generate_hi_res_midi_messages(&self, velocity: u16, channel: u8, note: u8) -> Vec<Vec<u8>> {
+        let msb = (velocity >> 7) as u8;         // 7-бит MSB (целая часть)
+        let lsb = (velocity & 0x7F) as u8;       // 7-бит LSB (дробная часть)
+        
+        vec![
+            vec![0x90 | (channel & 0x0F), 0xB0, 0x58, lsb], // Первое: CC сообщение для дробной части
+            vec![0x90 | (channel & 0x0F), note, msb, 0x00], // Второе: NoteOn для целой части (с padding)
+        ]
+    }
+    
+    /// Генерация тестовых hi-res MIDI сообщений для проверки исправлений
+    pub fn generate_hi_res_test_messages(&self) -> Vec<Vec<u8>> {
+        // Тестируем значение из примера: 20 (цельная) и 10 (дробная)
+        let test_velocity: u16 = (20 << 7) | 10; // 20*128 + 10 = 2570
+        
+        // Применяем кривую используя тот же алгоритм что и в process_hi_res_velocity
+        let processed_velocity = {
+            let mut dual_curve = self.dual_curve_processor.lock().unwrap();
+            
+            // Для линейной кривой сохраняем значение точно
+            if dual_curve.note_on_curve.control_points.len() == 2 {
+                let is_linear = dual_curve.note_on_curve.control_points[0].position.0 == 0.0 &&
+                               dual_curve.note_on_curve.control_points[0].position.1 == 0.0 &&
+                               dual_curve.note_on_curve.control_points[1].position.0 == 127.0 &&
+                               dual_curve.note_on_curve.control_points[1].position.1 == 127.0;
+                
+                if is_linear {
+                    return self.generate_hi_res_midi_messages(test_velocity, 0, 56);
+                }
+            }
+            
+            // Для нелинейных кривых применяем тот же алгоритм
+            let velocity_7bit = (test_velocity as f32 / 16383.0 * 127.0).clamp(0.0, 127.0);
+            let processed_7bit = dual_curve.note_on_curve.evaluate(velocity_7bit);
+            (processed_7bit as f32 / 127.0 * 16383.0).round() as u16
+        };
+        
+        self.generate_hi_res_midi_messages(processed_velocity, 0, 56)
     }
     
     pub fn start(&mut self) -> Result<(), Box<dyn std::error::Error>> {

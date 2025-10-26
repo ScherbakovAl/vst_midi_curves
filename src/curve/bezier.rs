@@ -199,6 +199,8 @@ impl Default for BezierCurve {
     }
 }
 mod tests {
+    use super::*;
+    use super::*;
 
     #[test]
     fn test_linear_curve() {

@@ -15,11 +15,11 @@ use crate::presets::PresetManager;
 use crate::settings::SettingsManager;
 
 // Подключаем все необходимые модули
-mod curve;
-mod presets;
-mod midi;
-mod midi_simple;
-mod settings;
+pub mod curve;
+pub mod presets;
+pub mod midi;
+pub mod midi_simple;
+pub mod settings;
 
 // Параметры плагина
 #[derive(Params)]
