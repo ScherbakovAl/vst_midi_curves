@@ -562,7 +562,7 @@ impl MidiCurvesApp {
     fn draw_main_ui(&mut self, ui: &mut egui::Ui) {
         // Заголовок приложения
         ui.horizontal(|ui| {
-            ui.label(egui::RichText::new("🎵 VST MIDI Curves Plugin - Dual Curves").size(18.0));
+            ui.label(egui::RichText::new("🎵 MIDI Curves Plugin - Dual Curves").size(18.0));
         });
         
         ui.add_space(10.0);
@@ -1185,7 +1185,7 @@ fn main() -> Result<(), eframe::Error> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1000.0, 600.0])
-            .with_title("VST MIDI Curves Plugin - Beta")
+            .with_title("MIDI Curves Plugin - Beta")
             .with_resizable(true)
             .with_fullscreen(false)
             .with_decorations(true),
@@ -1195,7 +1195,7 @@ fn main() -> Result<(), eframe::Error> {
     let app = MidiCurvesApp::new().unwrap();
     
     eframe::run_native(
-        "VST MIDI Curves Plugin",
+        "MIDI Curves Plugin",
         options,
         Box::new(move |_cc| {
             Ok(Box::new(app))
