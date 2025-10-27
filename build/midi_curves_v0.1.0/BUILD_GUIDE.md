@@ -193,9 +193,11 @@ cargo build --release --bin midi_curves
 
 #### Структура VST3 для Linux
 ```bash
-mkdir -p vst3/x86_64-linux/
-cp midi_curves_vst3.so vst3/x86_64-linux/MidiCurves.vst3
+mkdir -p MidiCurves.vst3/Contents/x86_64-linux/
+cp target/release/deps/libvst_midi_curves.so MidiCurves.vst3/Contents/x86_64-linux/MidiCurves.so
 ```
+
+**ВАЖНО:** На Linux VST3 плагин должен иметь расширение `.so`. Многие DAW (включая Reaper) не распознают плагин без этого расширения.
 
 #### Установка VST3
 ```bash

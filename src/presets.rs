@@ -221,7 +221,7 @@ pub struct PresetManager {
 }
 
 impl PresetManager {
-/// Создает новый менеджер пресетов
+    /// Создает новый менеджер пресетов
     pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
         let presets_dir = CurvePreset::get_presets_directory()?;
         
@@ -238,6 +238,15 @@ impl PresetManager {
         manager.load_all_presets()?;
         
         Ok(manager)
+    }
+    
+    /// Создает пустой менеджер пресетов (для VST3 при ошибке инициализации)
+    pub fn new_empty() -> Self {
+        Self {
+            presets: HashMap::new(),
+            dual_curve_presets: HashMap::new(),
+            presets_dir: PathBuf::new(),
+        }
     }
     
     /// Добавляет пресет
@@ -303,7 +312,24 @@ impl PresetManager {
         Ok(())
     }
     
-    /// Создает встроенные пресеты если их нет
+    /// Создает встроенные пресеты в памяти (без сохранения на диск)
+    /// Безопасно для VST3 плагинов, работающих в песочнице
+    pub fn create_builtin_presets_in_memory(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        let builtin_presets = self.get_builtin_presets_data();
+        
+        for (name, description, control_points) in builtin_presets {
+            if !self.presets.contains_key(&name) {
+                let preset = CurvePreset::new(name.clone(), description, control_points);
+                // Добавляем только в память, НЕ сохраняем на диск
+                self.presets.insert(name, preset);
+            }
+        }
+        
+        Ok(())
+    }
+    
+    /// Создает встроенные пресеты если их нет (с сохранением на диск)
+    /// Используется только в standalone приложении
     pub fn create_builtin_presets(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let builtin_presets = vec![
             (
@@ -386,6 +412,8 @@ impl PresetManager {
             ),
         ];
         
+        let builtin_presets = self.get_builtin_presets_data();
+        
         for (name, description, control_points) in builtin_presets {
             if !self.presets.contains_key(&name) {
                 let preset = CurvePreset::new(name, description, control_points);
@@ -394,6 +422,90 @@ impl PresetManager {
         }
         
         Ok(())
+    }
+    
+    /// Возвращает данные встроенных пресетов
+    fn get_builtin_presets_data(&self) -> Vec<(String, String, Vec<ControlPoint>)> {
+        vec![
+            (
+                "Linear".to_string(),
+                "Линейная кривая (y = x)".to_string(),
+                vec![
+                    ControlPoint::new((0.0, 0.0)),
+                    ControlPoint::new((127.0, 127.0)),
+                ],
+            ),
+            (
+                "Soft S-Curve".to_string(),
+                "Мягкая S-образная кривая".to_string(),
+                vec![
+                    ControlPoint::new((0.0, 0.0)),
+                    ControlPoint::new((42.0, 32.0)),
+                    ControlPoint::new((85.0, 95.0)),
+                    ControlPoint::new((127.0, 127.0)),
+                ],
+            ),
+            (
+                "Exponential".to_string(),
+                "Экспоненциальная кривая".to_string(),
+                vec![
+                    ControlPoint::new((0.0, 0.0)),
+                    ControlPoint::new((25.0, 12.0)),
+                    ControlPoint::new((63.0, 38.0)),
+                    ControlPoint::new((127.0, 127.0)),
+                ],
+            ),
+            (
+                "Inverse Exponential".to_string(),
+                "Обратная экспоненциальная кривая".to_string(),
+                vec![
+                    ControlPoint::new((0.0, 0.0)),
+                    ControlPoint::new((64.0, 89.0)),
+                    ControlPoint::new((102.0, 115.0)),
+                    ControlPoint::new((127.0, 127.0)),
+                ],
+            ),
+            (
+                "Sigmoid".to_string(),
+                "Сигмоидная кривая".to_string(),
+                vec![
+                    ControlPoint::new((0.0, 0.0)),
+                    ControlPoint::new((32.0, 16.0)),
+                    ControlPoint::new((95.0, 111.0)),
+                    ControlPoint::new((127.0, 127.0)),
+                ],
+            ),
+            (
+                "Hard Step".to_string(),
+                "Жесткая ступенька".to_string(),
+                vec![
+                    ControlPoint::new((0.0, 0.0)),
+                    ControlPoint::new((64.0, 0.0)),
+                    ControlPoint::new((64.0, 127.0)),
+                    ControlPoint::new((127.0, 127.0)),
+                ],
+            ),
+            (
+                "Gentle Curve".to_string(),
+                "Плавная кривая".to_string(),
+                vec![
+                    ControlPoint::new((0.0, 0.0)),
+                    ControlPoint::new((32.0, 20.0)),
+                    ControlPoint::new((95.0, 107.0)),
+                    ControlPoint::new((127.0, 127.0)),
+                ],
+            ),
+            (
+                "Aggressive Curve".to_string(),
+                "Агрессивная кривая".to_string(),
+                vec![
+                    ControlPoint::new((0.0, 0.0)),
+                    ControlPoint::new((48.0, 8.0)),
+                    ControlPoint::new((80.0, 80.0)),
+                    ControlPoint::new((127.0, 127.0)),
+                ],
+            ),
+        ]
     }
 }
 

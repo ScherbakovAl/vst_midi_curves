@@ -3,6 +3,7 @@
 //! VST3 плагин для обработки MIDI velocity с настраиваемыми кривыми Безье
 //! Включает систему сохранения и загрузки настроек
 
+use std::num::NonZeroU32;
 use std::sync::{Arc, Mutex};
 
 use nih_plug::prelude::*;
@@ -105,8 +106,9 @@ struct GuiState {
 
 impl Default for MidiCurvesPlugin {
     fn default() -> Self {
-        // Создаем менеджер настроек (загружает сохраненные настройки если есть)
-        let settings_manager = SettingsManager::new().unwrap_or_default();
+        // VST3: БЕЗОПАСНАЯ инициализация - используем только память, БЕЗ файловых операций
+        // Это предотвращает падение DAW из-за ограничений песочницы
+        let settings_manager = SettingsManager::new_vst3_safe();
         
         // Восстанавливаем DualCurve из настроек или создаем новый
         let dual_curve_processor = Arc::new(Mutex::new(settings_manager.restore_to_dual_curve()));
@@ -114,13 +116,17 @@ impl Default for MidiCurvesPlugin {
         // Создаем MIDI менеджер
         let midi_manager = Arc::new(Mutex::new(SimpleMidiManager::new(dual_curve_processor.clone())));
         
-        // Создаем систему пресетов
-        let preset_manager = Arc::new(Mutex::new(PresetManager::new().unwrap()));
+        // VST3: Создаем систему пресетов БЕЗ операций с файловой системой
+        // Используем пустой менеджер и добавляем встроенные пресеты только в памяти
+        let preset_manager = Arc::new(Mutex::new(PresetManager::new_empty()));
         
-        // Добавляем встроенные пресеты
+        // Добавляем встроенные пресеты в память (без сохранения на диск)
         {
-            let mut preset_manager = preset_manager.lock().unwrap();
-            preset_manager.create_builtin_presets().unwrap();
+            let mut preset_mgr = preset_manager.lock().unwrap();
+            // Создаем встроенные пресеты без сохранения на диск
+            if let Err(e) = preset_mgr.create_builtin_presets_in_memory() {
+                eprintln!("VST3: Ошибка создания встроенных пресетов: {}. Продолжаем без них.", e);
+            }
         }
         
         // Восстанавливаем настройку hi_res из сохраненных настроек
@@ -147,12 +153,12 @@ impl Plugin for MidiCurvesPlugin {
     const EMAIL: &'static str = "developer@vst-plugins.org";
     const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 
-    // MIDI-only плагин: пустые аудио каналы, только MIDI обработка
-    // Некоторые DAW требуют хотя бы один layout, даже для MIDI-only плагинов
+    // MIDI-only плагин с минимальным стерео layout для совместимости с Reaper
+    // Reaper требует хотя бы стерео вход/выход, даже для MIDI-only плагинов
     const AUDIO_IO_LAYOUTS: &'static [AudioIOLayout] = &[
         AudioIOLayout {
-            main_input_channels: None,
-            main_output_channels: None,
+            main_input_channels: NonZeroU32::new(2),
+            main_output_channels: NonZeroU32::new(2),
             ..AudioIOLayout::const_default()
         },
     ];
@@ -178,6 +184,12 @@ impl Plugin for MidiCurvesPlugin {
     }
 
 fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
+    // ВРЕМЕННО ОТКЛЮЧЕНО: GUI вызывает панику при загрузке в DAW
+    // Проблема: egui пытается обратиться к шрифтам до Context::run()
+    // TODO: Найти способ безопасной инициализации egui в VST3
+    None
+    
+    /*
     let egui_state = EguiState::from_size(1200, 800);
     let controller = GuiController {
         dual_curve_processor: self.dual_curve_processor.clone(),
@@ -199,6 +211,7 @@ fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Edi
             // Empty update function
         },
     )
+    */
 }
 
 fn process(
@@ -359,9 +372,9 @@ fn process(
 // Implement required traits for VST3 plugin
 impl Vst3Plugin for MidiCurvesPlugin {
     const VST3_CLASS_ID: [u8; 16] = *b"MidiCurvesVST3!!";
-    // Категория для MIDI плагина - Instrument позволяет работать с MIDI данными
+    // Категория для MIDI плагина - Fx|MIDI для MIDI эффектов
     const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] = &[
-        Vst3SubCategory::Instrument,
+        Vst3SubCategory::Fx,
         Vst3SubCategory::Tools,
     ];
 }
@@ -385,7 +398,7 @@ impl GuiController {
         
         // Заголовок
         ui.horizontal(|ui| {
-            ui.label(egui::RichText::new("🎵 MIDI Curves VST3 Plugin").size(20.0));
+            ui.heading("🎵 MIDI Curves VST3 Plugin");
         });
         
         ui.add_space(10.0);
@@ -404,7 +417,7 @@ impl GuiController {
     
     /// Редактор кривой
     fn draw_curve_editor(&self, ui: &mut egui::Ui) {
-        ui.label(egui::RichText::new("🎯 Редактор кривой Безье").size(16.0));
+        ui.heading("🎯 Редактор кривой Безье");
         ui.add_space(5.0);
         
         // Canvas для графика
@@ -468,7 +481,7 @@ impl GuiController {
     fn draw_control_panel(&self, ui: &mut egui::Ui) {
         // Тест кривой
         ui.group(|ui| {
-            ui.label(egui::RichText::new("🎯 Тест кривой").size(14.0));
+            ui.strong("🎯 Тест кривой");
             
             let mut test_velocity = 64.0;
             ui.horizontal(|ui| {
@@ -516,7 +529,7 @@ impl GuiController {
         
         // Панель настроек Hi-Res MIDI
         ui.group(|ui| {
-            ui.label(egui::RichText::new("⚙️ MIDI Settings").size(14.0));
+            ui.strong("⚙️ MIDI Settings");
             
             let mut hi_res_enabled = self.dual_curve_processor.lock().unwrap().is_hi_res_enabled();
             
@@ -524,11 +537,10 @@ impl GuiController {
                 // Обновляем состояние в dual_curve
                 self.dual_curve_processor.lock().unwrap().set_hi_res_enabled(hi_res_enabled);
                 
-                // Сохраняем в настройки
+                // Обновляем в настройках (в памяти, без сохранения на диск в VST3)
                 self.settings_manager.clone().set_hi_res_enabled(hi_res_enabled);
-                if self.settings_manager.is_auto_save_enabled() {
-                    let _ = self.settings_manager.clone().save();
-                }
+                // В VST3 автосохранение на диск отключено
+                let _ = self.settings_manager.clone().save(); // No-op в VST3 режиме
             }
             
             ui.add_space(5.0);
@@ -545,7 +557,7 @@ impl GuiController {
         
         // Панель пресетов
         ui.group(|ui| {
-            ui.label(egui::RichText::new("📁 Пресеты").size(14.0));
+            ui.strong("📁 Пресеты");
             
             let preset_names = self.preset_manager.lock().unwrap().get_preset_names();
             
@@ -572,7 +584,7 @@ impl GuiController {
         
         // Информация о плагине
         ui.group(|ui| {
-            ui.label(egui::RichText::new("ℹ️ Информация").size(14.0));
+            ui.strong("ℹ️ Информация");
             ui.label(format!("Версия: {}", env!("CARGO_PKG_VERSION")));
             ui.label("Платформа: VST3 Standalone");
             
@@ -610,11 +622,10 @@ impl GuiController {
         
         // Сохранение настроек при отпускании кнопки мыши (drag release)
         if response.drag_released() && gui_state.is_dragging {
-            // Мышь отпущена - сохраняем настройки
+            // Мышь отпущена - обновляем настройки в памяти (без сохранения на диск в VST3)
             gui_state.is_dragging = false;
-            if let Err(e) = self.auto_save_settings() {
-                eprintln!("Ошибка автосохранения настроек VST3: {}", e);
-            }
+            // Автосохранение в VST3 отключено - настройки хранятся только в памяти
+            let _ = self.auto_save_settings(); // Игнорируем результат, т.к. в VST3 это no-op
         }
         
         // Двойной клик для добавления точки
@@ -674,14 +685,7 @@ impl GuiController {
             painter.circle_filled(screen_pos, 6.0, color);
             painter.circle_stroke(screen_pos, 6.0, egui::Stroke::new(1.0, egui::Color32::BLACK));
             
-            // Номер точки
-            painter.text(
-                screen_pos + egui::vec2(8.0, -8.0),
-                egui::Align2::LEFT_TOP,
-                i.to_string(),
-                egui::FontId::default(),
-                egui::Color32::WHITE,
-            );
+            // Номер точки убран для совместимости с VST3 (FontId вызывает панику до Context::run())
         }
     }
     
@@ -755,24 +759,25 @@ impl GuiController {
 // Реализация плагина
 impl MidiCurvesPlugin {
     /// Сохраняет текущие настройки плагина
+    /// В VST3 режиме только обновляет настройки в памяти
     pub fn save_settings(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        // Обновляем состояние кривых в настройках
+        // Обновляем состояние кривых в настройках (в памяти)
         self.settings_manager.update_from_dual_curve(&self.dual_curve_processor.lock().unwrap());
         
-        // Сохраняем настройки в файл
+        // В VST3 это no-op (не записывает на диск), в standalone сохраняет в файл
         self.settings_manager.save()
     }
     
-    /// Восстанавливает настройки плагина
+    /// Восстанавливает настройки плагина из памяти
     pub fn load_settings(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        // Восстанавливаем DualCurve из настроек
+        // Восстанавливаем DualCurve из настроек (из памяти в VST3)
         let restored_curve = self.settings_manager.restore_to_dual_curve();
         *self.dual_curve_processor.lock().unwrap() = restored_curve;
         
         Ok(())
     }
     
-    /// Сбрасывает плагин к настройкам по умолчанию
+    /// Сбрасывает плагин к настройкам по умолчанию (только в памяти в VST3)
     pub fn reset_to_defaults(&mut self) {
         self.settings_manager.reset_to_default();
         
@@ -784,14 +789,16 @@ impl MidiCurvesPlugin {
 // Реализация GuiController
 impl GuiController {
     /// Автоматически сохраняет настройки если включено автосохранение
+    /// В VST3 режиме только обновляет настройки в памяти без записи на диск
     fn auto_save_settings(&self) -> Result<(), Box<dyn std::error::Error>> {
+        // Обновляем состояние кривых в настройках (в памяти)
+        let dual_curve = self.dual_curve_processor.lock().unwrap();
+        let mut settings_manager = self.settings_manager.clone();
+        settings_manager.update_from_dual_curve(&dual_curve);
+        
+        // В VST3 режиме save() является no-op (не записывает на диск)
+        // В standalone режиме сохраняет в файл, если автосохранение включено
         if self.settings_manager.is_auto_save_enabled() {
-            // Обновляем состояние кривых в настройках
-            let dual_curve = self.dual_curve_processor.lock().unwrap();
-            let mut settings_manager = self.settings_manager.clone();
-            settings_manager.update_from_dual_curve(&dual_curve);
-            
-            // Сохраняем настройки в файл
             settings_manager.save()
         } else {
             Ok(())

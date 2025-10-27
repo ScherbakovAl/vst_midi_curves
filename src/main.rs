@@ -1332,14 +1332,7 @@ fn draw_bezier_curve(&mut self, painter: &Painter, rect: Rect) {
             painter.circle_filled(screen_pos, 6.0, color);
             painter.circle_stroke(screen_pos, 6.0, egui::Stroke::new(1.0, stroke_color));
             
-            // Номер точки
-            painter.text(
-                screen_pos + egui::vec2(8.0, -8.0),
-                egui::Align2::LEFT_TOP,
-                i.to_string(),
-                egui::FontId::default(),
-                egui::Color32::WHITE,
-            );
+            // Номер точки убран для совместимости с VST3 (FontId вызывает панику до Context::run())
         }
     }
     

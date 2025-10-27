@@ -89,7 +89,7 @@ impl Default for AppSettings {
 }
 
 impl SettingsManager {
-    /// Создает новый менеджер настроек
+    /// Создает новый менеджер настроек (для standalone версии)
     pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
         let settings_path = Self::get_settings_path()?;
         
@@ -111,11 +111,30 @@ impl SettingsManager {
         })
     }
     
-    /// Сохраняет текущие настройки
+    /// Создает менеджер настроек для VST3 (только в памяти, БЕЗ файловых операций)
+    pub fn new_vst3_safe() -> Self {
+        Self {
+            settings: AppSettings::default(),
+            settings_path: PathBuf::new(), // Пустой путь - не используется
+        }
+    }
+    
+    /// Сохраняет текущие настройки (для standalone версии)
     pub fn save(&self) -> Result<(), Box<dyn std::error::Error>> {
+        // Проверяем что путь установлен (не VST3 режим)
+        if self.settings_path.as_os_str().is_empty() {
+            // VST3 режим - игнорируем сохранение без ошибки
+            return Ok(());
+        }
+        
         let json = serde_json::to_string_pretty(&self.settings)?;
         fs::write(&self.settings_path, json)?;
         Ok(())
+    }
+    
+    /// Проверяет, работает ли в режиме VST3 (только в памяти)
+    pub fn is_vst3_mode(&self) -> bool {
+        self.settings_path.as_os_str().is_empty()
     }
     
     /// Загружает настройки из файла

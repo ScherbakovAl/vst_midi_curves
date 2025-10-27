@@ -32,14 +32,14 @@ if ! pkg-config --exists gtk4; then
 fi
 
 echo "🏗️ Сборка VST3 плагина..."
-cargo build --release --bin midi_curves_vst3
+cargo build --release --lib
 
 echo "📦 Сборка standalone приложения..."
 cargo build --release --bin midi_curves
 
 echo "📁 Создание структуры VST3 для Linux..."
 mkdir -p "target/release/vst3/x86_64-linux"
-cp "target/release/midi_curves_vst3.so" "target/release/vst3/x86_64-linux/MidiCurves.vst3"
+cp "target/release/libvst_midi_curves.so" "target/release/vst3/x86_64-linux/MidiCurves.so"
 
 # Создаем desktop файл для standalone приложения
 mkdir -p "target/release/applications"
@@ -65,7 +65,7 @@ fi
 
 echo "✅ Сборка завершена!"
 echo "📂 Файлы находятся в:"
-echo "   - VST3: target/release/vst3/x86_64-linux/MidiCurves.vst3"
+echo "   - VST3: target/release/vst3/x86_64-linux/MidiCurves.so"
 echo "   - Standalone: target/release/midi_curves"
 echo "   - Desktop файл: target/release/applications/MidiCurves.desktop"
 

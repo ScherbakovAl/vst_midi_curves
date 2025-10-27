@@ -49,7 +49,7 @@ case $PLATFORM in
         # Проверяем наличие VST3 плагина
         VST3_PLUGIN="target/release/deps/libvst_midi_curves.so"
         if [ -f "$VST3_PLUGIN" ]; then
-            cp "$VST3_PLUGIN" build/midi_curves_v0.1.0/MidiCurves.vst3/Contents/x86_64-linux/MidiCurves
+            cp "$VST3_PLUGIN" build/midi_curves_v0.1.0/MidiCurves.vst3/Contents/x86_64-linux/MidiCurves.so
             echo "✅ VST3 плагин скопирован"
         else
             echo "❌ VST3 плагин не найден: $VST3_PLUGIN"
