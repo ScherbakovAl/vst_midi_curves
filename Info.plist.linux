@@ -11,32 +11,13 @@
     <key>CFBundleDisplayName</key>
     <string>MIDI Curves</string>
     <key>CFBundleVersion</key>
-    <string>0.1.0</string>
+    <string>0x01000000</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.1.0</string>
+    <string>1.0.0</string>
     <key>CFBundleSignature</key>
     <string>????</string>
     <key>CFBundlePackageType</key>
     <string>BNDL</string>
-    <key>VST</key>
-    <dict>
-        <key>Version</key>
-        <string>0x01000000</string>
-        <key>Name</key>
-        <string>MIDI Curves</string>
-        <key>ID</key>
-        <data>MmlkaUN1cnZlU1QyIQ==</data>
-        <key>Category</key>
-        <integer>0</integer>
-        <key>HasClip</key>
-        <false/>
-        <key>HasVu</key>
-        <false/>
-        <key>IsSynth</key>
-        <true/>
-        <key>CanMidiProcessEventChords</key>
-        <false/>
-    </dict>
     <key>VST3</key>
     <dict>
         <key>Version</key>
@@ -44,26 +25,26 @@
         <key>Name</key>
         <string>MIDI Curves</string>
         <key>ID</key>
-        <data>MmlkaUN1cnZlU1QyIQ==</data>
+        <data>TWlkZEN1cnZlU1QzISE=</data>
         <key>Category</key>
-        <string>Instrument</string>
+        <string>Fx</string>
         <key>ClassFlags</key>
-        <integer>0x00000001</integer>
+        <integer>0x00000000</integer>
         <key>SubCategories</key>
-        <string>Instrument</string>
+        <string>Fx/MIDI</string>
         <key>Manufacturer</key>
         <string>Your Company</string>
         <key>Classes</key>
         <array>
             <dict>
                 <key>CID</key>
-                <data>MmlkaUN1cnZlU1QyIQ==</data>
+                <data>TWlkZEN1cnZlU1QzISE=</data>
                 <key>Category</key>
-                <string>kVstProcessContextCategory</string>
+                <string>kVstEffectAudioModuleClass</string>
                 <key>Name</key>
                 <string>MIDI Curves</string>
                 <key>ClassID</key>
-                <data>MmlkaUN1cnZlU1QyIQ==</data>
+                <data>TWlkZEN1cnZlU1QzISE=</data>
                 <key>Version</key>
                 <string>0x01000000</string>
                 <key>_sdkVersion</key>

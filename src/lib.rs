@@ -142,9 +142,9 @@ impl Default for MidiCurvesPlugin {
 
 impl Plugin for MidiCurvesPlugin {
     const NAME: &'static str = "MIDI Curves";
-    const VENDOR: &'static str = "Your Company";
-    const URL: &'static str = "https://yourcompany.com";
-    const EMAIL: &'static str = "your@email.com";
+    const VENDOR: &'static str = "Rust VST Developer";
+    const URL: &'static str = "https://github.com/vst-midi-curves";
+    const EMAIL: &'static str = "developer@vst-plugins.org";
     const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 
     // Это MIDI плагин, используем пустой audio layout
@@ -352,7 +352,7 @@ fn process(
 // Implement required traits for VST3 plugin
 impl Vst3Plugin for MidiCurvesPlugin {
     const VST3_CLASS_ID: [u8; 16] = *b"MidiCurvesVST3!!";
-    const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] = &[];
+    const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] = &[Vst3SubCategory::Fx];
 }
 
 impl ClapPlugin for MidiCurvesPlugin {
