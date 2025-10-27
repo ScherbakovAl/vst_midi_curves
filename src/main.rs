@@ -46,6 +46,7 @@ struct MidiCurvesApp {
     selected_point: Option<usize>,
     is_dragging: bool,
     drag_start: Option<Pos2>,
+    shift_pressed: bool,
     
     // Активная вкладка: true для NoteOn, false для NoteOff
     active_tab_note_on: bool,
@@ -88,6 +89,7 @@ fn new() -> Result<Self, Box<dyn std::error::Error>> {
             selected_point: None,
             is_dragging: false,
             drag_start: None,
+            shift_pressed: false,
             active_tab_note_on: settings_manager.get_active_curve_tab() == 0, // Восстанавливаем из настроек
             preset_manager,
             selected_preset: None,
@@ -497,7 +499,37 @@ fn remove_selected_point(&mut self) -> bool {
 // Обновление позиции точки в активной кривой
 fn update_selected_point(&mut self, position: Pos2, rect: Rect) {
     if let Some(index) = self.selected_point {
-        let world_pos = self.screen_to_world(position, rect);
+        let mut world_pos = self.screen_to_world(position, rect);
+        
+        {
+            let dual_curve = self.dual_curve.lock().unwrap();
+            let points = if self.active_tab_note_on {
+                &dual_curve.note_on_curve.control_points
+            } else {
+                &dual_curve.note_off_curve.control_points
+            };
+            
+            // При тонком перемещении (Shift) ограничиваем скорость перемещения
+            if self.shift_pressed {
+                if let Some(current_point) = points.get(index) {
+                    let current_x = current_point.position.0;
+                    let current_y = current_point.position.1;
+                    
+                    let dx = world_pos.x - current_x;
+                    let dy = world_pos.y - current_y;
+                    
+                    // В тонком режиме двигаемся очень медленно
+                    // Максимальный шаг 0.02 за одно обновление (сотые доли)
+                    let max_fine_step = 0.02;
+                    
+                    world_pos = Pos2::new(
+                        current_x + dx.signum() * dx.abs().min(max_fine_step),
+                        current_y + dy.signum() * dy.abs().min(max_fine_step)
+                    );
+                }
+            }
+        }
+        
         {
             let mut dual_curve = self.dual_curve.lock().unwrap();
             
@@ -548,6 +580,9 @@ fn find_point_at(&self, screen_pos: Pos2, rect: Rect) -> Option<usize> {
 
 impl eframe::App for MidiCurvesApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Обработка нажатий клавиш
+        self.shift_pressed = ctx.input(|i| i.modifiers.shift);
+        
         // Отрисовка главного окна
         egui::CentralPanel::default().show(ctx, |ui| {
             self.draw_main_ui(ui);
@@ -646,7 +681,12 @@ impl MidiCurvesApp {
                     };
                     
                     if let Some(point) = points.get(index) {
-                        ui.label(format!("🎯 Selected Point {}: ({:.1}, {:.1})", index, point.position.0, point.position.1));
+                        let format_str = if self.shift_pressed {
+                            format!("🎯 Selected Point {}: ({:.2}, {:.2}) [FINE MODE]", index, point.position.0, point.position.1)
+                        } else {
+                            format!("🎯 Selected Point {}: ({:.1}, {:.1})", index, point.position.0, point.position.1)
+                        };
+                        ui.label(format_str);
                     }
                 } else {
                     ui.label(format!("🎯 No point selected for {} curve - click on curve to select", curve_type));
@@ -656,6 +696,19 @@ impl MidiCurvesApp {
                 
                 // Инструкции для работы с кривой
                 ui.label(egui::RichText::new("Double click - add point. Right click - delete point").size(12.0));
+                
+                // Индикация режима тонкого перемещения
+                if self.shift_pressed {
+                    ui.colored_label(
+                        egui::Color32::from_rgb(100, 200, 100),
+                        "🔧 FINE MODE: Shift held - precise positioning (0.01 increments)"
+                    );
+                } else {
+                    ui.colored_label(
+                        egui::Color32::from_gray(120),
+                        "💫 Hold Shift for fine control (0.01 increments)"
+                    );
+                }
                 
                 ui.add_space(5.0);
                 
@@ -691,7 +744,12 @@ impl MidiCurvesApp {
                             ui.label(format!("📋 {} Curve Point List:", curve_type));
                             for (i, point) in points.iter().enumerate() {
                                 let marker = if Some(i) == self.selected_point { "▶ " } else { "• " };
-                                ui.label(format!("{}Point {}: ({:.1}, {:.1})", marker, i, point.position.0, point.position.1));
+                                let coord_format = if self.shift_pressed {
+                                    format!("{:.2}, {:.2}", point.position.0, point.position.1)
+                                } else {
+                                    format!("{:.1}, {:.1}", point.position.0, point.position.1)
+                                };
+                                ui.label(format!("{}Point {}: ({})", marker, i, coord_format));
                             }
                         });
                 }
