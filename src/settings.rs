@@ -169,6 +169,9 @@ impl SettingsManager {
                 handle_out_y: point.handle_out.1,
             })
             .collect();
+        
+        // Сохраняем состояние Hi-Res режима
+        self.settings.hi_res_enabled = dual_curve.is_hi_res_enabled();
     }
     
     /// Восстанавливает DualCurve из сохраненных настроек
@@ -193,7 +196,13 @@ impl SettingsManager {
             })
             .collect();
         
-        DualCurve::from_points(note_on_points, note_off_points)
+        // Создаем DualCurve с точками
+        let mut dual_curve = DualCurve::from_points(note_on_points, note_off_points);
+        
+        // Восстанавливаем состояние Hi-Res режима из настроек
+        dual_curve.set_hi_res_enabled(self.settings.hi_res_enabled);
+        
+        dual_curve
     }
     
     /// Обновляет последний загруженный пресет
