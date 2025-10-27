@@ -882,7 +882,9 @@ impl MidiCurvesApp {
                 for preset_name in preset_names {
                     let is_selected = self.selected_preset.as_ref() == Some(&preset_name);
                     if ui.selectable_label(is_selected, &preset_name).clicked() {
-                        self.selected_preset = Some(preset_name);
+                        self.selected_preset = Some(preset_name.clone());
+                        // Загружаем пресет сразу при клике на название
+                        self.load_preset(&preset_name);
                     }
                 }
             });
