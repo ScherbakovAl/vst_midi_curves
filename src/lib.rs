@@ -28,6 +28,43 @@ struct MidiCurvesParams {
     control_points_count: IntParam,
 }
 
+/// Буфер для hi-res MIDI сообщений в VST (CC#88 + NoteOn/Off)
+#[derive(Debug, Clone)]
+struct VstHiResBuffer {
+    channel: Option<u8>,
+    lower_bits: Option<u8>,
+}
+
+impl VstHiResBuffer {
+    fn new() -> Self {
+        Self {
+            channel: None,
+            lower_bits: None,
+        }
+    }
+    
+    fn store_cc88(&mut self, channel: u8, lower_bits: u8) {
+        self.channel = Some(channel);
+        self.lower_bits = Some(lower_bits);
+    }
+    
+    fn extract(&mut self, channel: u8) -> Option<u8> {
+        if let (Some(buffered_channel), Some(lower)) = (self.channel, self.lower_bits) {
+            if buffered_channel == channel {
+                self.clear();
+                return Some(lower);
+            }
+        }
+        self.clear();
+        None
+    }
+    
+    fn clear(&mut self) {
+        self.channel = None;
+        self.lower_bits = None;
+    }
+}
+
 // Основная структура плагина
 struct MidiCurvesPlugin {
     /// Процессор кривой Безье (две кривые: NoteOn и NoteOff)
@@ -44,6 +81,9 @@ struct MidiCurvesPlugin {
     
     /// Состояние GUI
     gui_state: Arc<Mutex<GuiState>>,
+    
+    /// Буфер для hi-res MIDI сообщений
+    hi_res_buffer: Arc<Mutex<VstHiResBuffer>>,
 }
 
 // Структура для GUI состояния
@@ -83,12 +123,19 @@ impl Default for MidiCurvesPlugin {
             preset_manager.create_builtin_presets().unwrap();
         }
         
+        // Восстанавливаем настройку hi_res из сохраненных настроек
+        {
+            let mut dual_curve = dual_curve_processor.lock().unwrap();
+            dual_curve.set_hi_res_enabled(settings_manager.is_hi_res_enabled());
+        }
+        
         Self {
             dual_curve_processor,
             midi_manager,
             preset_manager,
             settings_manager: settings_manager.clone(),
             gui_state: Arc::new(Mutex::new(GuiState::default())),
+            hi_res_buffer: Arc::new(Mutex::new(VstHiResBuffer::new())),
         }
     }
 }
@@ -156,6 +203,29 @@ fn process(
         // Обрабатываем MIDI события
         while let Some(event) = context.next_event() {
             match event {
+                NoteEvent::MidiCC {
+                    timing,
+                    channel,
+                    cc,
+                    value,
+                    ..
+                } => {
+                    // Проверяем CC#88 для hi-res режима
+                    if cc == 88 {
+                        let hi_res_enabled = self.dual_curve_processor.lock().unwrap().is_hi_res_enabled();
+                        if hi_res_enabled {
+                            // Hi-res включен - сохраняем CC#88 в буфер
+                            let ll = (value * 127.0) as u8;
+                            self.hi_res_buffer.lock().unwrap().store_cc88(channel, ll);
+                        }
+                        // В обоих случаях не отправляем CC#88 дальше
+                        // (в стандартном режиме просто игнорируем, в hi-res буферизуем)
+                        continue;
+                    }
+                    // Остальные CC пропускаем без изменений
+                    context.send_event(event);
+                }
+                
                 NoteEvent::NoteOn {
                     timing,
                     voice_id,
@@ -164,19 +234,52 @@ fn process(
                     velocity,
                     ..
                 } => {
-                    // Применяем кривую к velocity
-                    let processed_velocity = {
-                        let mut curve = self.dual_curve_processor.lock().unwrap();
-                        curve.process_note_on_velocity((velocity * 127.0) as u8) as f32 / 127.0
-                    };
-
-                    context.send_event(NoteEvent::NoteOn {
-                        timing,
-                        voice_id,
-                        channel,
-                        note,
-                        velocity: processed_velocity,
-                    });
+                    let mut curve = self.dual_curve_processor.lock().unwrap();
+                    let hi_res_enabled = curve.is_hi_res_enabled();
+                    
+                    if hi_res_enabled {
+                        // Проверяем буфер на наличие CC#88
+                        let lower_bits = self.hi_res_buffer.lock().unwrap().extract(channel);
+                        
+                        // В hi-res режиме ВСЕГДА обрабатываем как 14-бит
+                        // Если нет CC#88, используем LL=0
+                        let ll = lower_bits.unwrap_or(0);
+                        let hh = (velocity * 127.0) as u8;
+                        let velocity_14bit = crate::curve::DualCurve::combine_14bit(ll, hh);
+                        
+                        // Обрабатываем через 14-битную кривую
+                        let processed_14bit = curve.process_note_on_velocity_14bit(velocity_14bit);
+                        
+                        // Разделяем обратно на LL и HH
+                        let (new_ll, new_hh) = crate::curve::DualCurve::split_14bit(processed_14bit);
+                        
+                        // Отправляем CC#88
+                        context.send_event(NoteEvent::MidiCC {
+                            timing,
+                            channel,
+                            cc: 88,
+                            value: new_ll as f32 / 127.0,
+                        });
+                        
+                        // Отправляем NoteOn
+                        context.send_event(NoteEvent::NoteOn {
+                            timing,
+                            voice_id,
+                            channel,
+                            note,
+                            velocity: new_hh as f32 / 127.0,
+                        });
+                    } else {
+                        // Hi-res выключен - обычная обработка
+                        let processed_velocity = curve.process_note_on_velocity((velocity * 127.0) as u8);
+                        context.send_event(NoteEvent::NoteOn {
+                            timing,
+                            voice_id,
+                            channel,
+                            note,
+                            velocity: processed_velocity as f32 / 127.0,
+                        });
+                    }
                 }
                 
                 NoteEvent::NoteOff {
@@ -187,19 +290,52 @@ fn process(
                     velocity,
                     ..
                 } => {
-                    // Применяем кривую для NoteOff
-                    let processed_velocity = {
-                        let mut curve = self.dual_curve_processor.lock().unwrap();
-                        curve.process_note_off_velocity((velocity * 127.0) as u8) as f32 / 127.0
-                    };
-
-                    context.send_event(NoteEvent::NoteOff {
-                        timing,
-                        voice_id,
-                        channel,
-                        note,
-                        velocity: processed_velocity,
-                    });
+                    let mut curve = self.dual_curve_processor.lock().unwrap();
+                    let hi_res_enabled = curve.is_hi_res_enabled();
+                    
+                    if hi_res_enabled {
+                        // Проверяем буфер на наличие CC#88
+                        let lower_bits = self.hi_res_buffer.lock().unwrap().extract(channel);
+                        
+                        // В hi-res режиме ВСЕГДА обрабатываем как 14-бит
+                        // Если нет CC#88, используем LL=0
+                        let ll = lower_bits.unwrap_or(0);
+                        let hh = (velocity * 127.0) as u8;
+                        let velocity_14bit = crate::curve::DualCurve::combine_14bit(ll, hh);
+                        
+                        // Обрабатываем через 14-битную кривую
+                        let processed_14bit = curve.process_note_off_velocity_14bit(velocity_14bit);
+                        
+                        // Разделяем обратно на LL и HH
+                        let (new_ll, new_hh) = crate::curve::DualCurve::split_14bit(processed_14bit);
+                        
+                        // Отправляем CC#88
+                        context.send_event(NoteEvent::MidiCC {
+                            timing,
+                            channel,
+                            cc: 88,
+                            value: new_ll as f32 / 127.0,
+                        });
+                        
+                        // Отправляем NoteOff
+                        context.send_event(NoteEvent::NoteOff {
+                            timing,
+                            voice_id,
+                            channel,
+                            note,
+                            velocity: new_hh as f32 / 127.0,
+                        });
+                    } else {
+                        // Hi-res выключен - обычная обработка
+                        let processed_velocity = curve.process_note_off_velocity((velocity * 127.0) as u8);
+                        context.send_event(NoteEvent::NoteOff {
+                            timing,
+                            voice_id,
+                            channel,
+                            note,
+                            velocity: processed_velocity as f32 / 127.0,
+                        });
+                    }
                 }
                 
                 _ => {
@@ -363,6 +499,35 @@ impl GuiController {
                 
                 ui.label(format!("Output: {}", output_velocity));
             });
+        });
+        
+        ui.add_space(10.0);
+        
+        // Панель настроек Hi-Res MIDI
+        ui.group(|ui| {
+            ui.label(egui::RichText::new("⚙️ MIDI Settings").size(14.0));
+            
+            let mut hi_res_enabled = self.dual_curve_processor.lock().unwrap().is_hi_res_enabled();
+            
+            if ui.checkbox(&mut hi_res_enabled, "Enable Hi-Res MIDI (14-bit velocity)").clicked() {
+                // Обновляем состояние в dual_curve
+                self.dual_curve_processor.lock().unwrap().set_hi_res_enabled(hi_res_enabled);
+                
+                // Сохраняем в настройки
+                self.settings_manager.clone().set_hi_res_enabled(hi_res_enabled);
+                if self.settings_manager.is_auto_save_enabled() {
+                    let _ = self.settings_manager.clone().save();
+                }
+            }
+            
+            ui.add_space(5.0);
+            
+            if hi_res_enabled {
+                ui.colored_label(egui::Color32::from_rgb(100, 200, 100), "✓ Hi-Res mode: 14-bit velocity (0-16383)");
+                ui.label("Format: CC#88 (LL) + NoteOn/Off (HH)");
+            } else {
+                ui.colored_label(egui::Color32::from_rgb(200, 200, 100), "Standard mode: 7-bit velocity (0-127)");
+            }
         });
         
         ui.add_space(10.0);

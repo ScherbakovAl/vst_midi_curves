@@ -88,6 +88,61 @@ impl MidiStats {
     }
 }
 
+/// Буфер для hi-res MIDI сообщений (CC#88 + NoteOn/Off)
+#[derive(Debug, Clone)]
+struct HiResBuffer {
+    /// Канал для которого буферизуем
+    channel: Option<u8>,
+    /// Младшие 7 бит (из CC#88)
+    lower_bits: Option<u8>,
+    /// Время получения CC#88
+    timestamp: Option<std::time::Instant>,
+}
+
+impl HiResBuffer {
+    fn new() -> Self {
+        Self {
+            channel: None,
+            lower_bits: None,
+            timestamp: None,
+        }
+    }
+    
+    /// Сохраняет CC#88 сообщение
+    fn store_cc88(&mut self, channel: u8, lower_bits: u8) {
+        self.channel = Some(channel);
+        self.lower_bits = Some(lower_bits);
+        self.timestamp = Some(std::time::Instant::now());
+    }
+    
+    /// Извлекает буферизованное значение если доступно и канал совпадает
+    fn extract(&mut self, channel: u8) -> Option<u8> {
+        if let (Some(buffered_channel), Some(lower)) = (self.channel, self.lower_bits) {
+            // Проверяем что канал совпадает
+            if buffered_channel == channel {
+                // Проверяем таймаут (100мс)
+                if let Some(ts) = self.timestamp {
+                    if ts.elapsed().as_millis() < 100 {
+                        // Очищаем буфер и возвращаем значение
+                        self.clear();
+                        return Some(lower);
+                    }
+                }
+            }
+        }
+        // Если не подошло - очищаем буфер
+        self.clear();
+        None
+    }
+    
+    /// Очищает буфер
+    fn clear(&mut self) {
+        self.channel = None;
+        self.lower_bits = None;
+        self.timestamp = None;
+    }
+}
+
 // Основной MIDI менеджер
 pub struct MidiManager {
     // Управление портами
@@ -113,6 +168,9 @@ pub struct MidiManager {
     is_running: bool,
     input_enabled: bool,
     output_enabled: bool,
+    
+    // Буфер для hi-res MIDI сообщений
+    hi_res_buffer: Arc<Mutex<HiResBuffer>>,
 }
 
 impl MidiManager {
@@ -128,6 +186,7 @@ impl MidiManager {
             is_running: false,
             input_enabled: false,
             output_enabled: false,
+            hi_res_buffer: Arc::new(Mutex::new(HiResBuffer::new())),
         }
     }
     
@@ -190,11 +249,28 @@ impl MidiManager {
         let event_processor = Arc::clone(&self.event_processor);
         let stats = Arc::clone(&self.stats);
         let output_callback = self.output_callback.clone();
+        let hi_res_buffer = Arc::clone(&self.hi_res_buffer);
         
         let port_manager_for_callback = Arc::clone(&self.port_manager);
         
         let callback = Arc::new(Mutex::new(move |data: &[u8], timestamp: u64| {
             let receive_time = std::time::Instant::now();
+            
+            // Проверяем CC#88 для hi-res режима
+            if data.len() >= 3 && (data[0] & 0xF0) == 0xB0 && data[1] == 88 {
+                // Проверяем включен ли hi-res режим
+                let hi_res_enabled = dual_curve_processor.lock().unwrap().is_hi_res_enabled();
+                
+                if hi_res_enabled {
+                    // Hi-res включен - сохраняем CC#88 в буфер
+                    let channel = data[0] & 0x0F;
+                    let lower_bits = data[2];
+                    hi_res_buffer.lock().unwrap().store_cc88(channel, lower_bits);
+                }
+                // В обоих случаях не отправляем CC#88 дальше
+                // (в стандартном режиме просто игнорируем, в hi-res буферизуем)
+                return;
+            }
             
             // Parse MIDI data
             if let Ok(midi_event) = MidiEvent::from_midi_data(data, timestamp) {
@@ -204,44 +280,49 @@ impl MidiManager {
                     Self::update_stats(&midi_event, &mut stats_mut);
                 }
                 
-                // Process through dual velocity curves
-                let processed_event = Self::process_velocity(midi_event, &dual_curve_processor);
+                // Process through dual velocity curves (с учетом hi-res)
+                let processed_events = Self::process_velocity_with_hires(
+                    midi_event,
+                    &dual_curve_processor,
+                    &hi_res_buffer
+                );
                 
-                // Send processed event through callback
-                if let Some(ref callback) = output_callback {
-                    callback(processed_event.clone());
-                }
-                
-                // Send to output ports
-                let output_data = processed_event.to_midi_data();
-                
-                let send_time = std::time::Instant::now();
-                
-                // Send to all connected output ports
-                let mut sent_count = 0;
-                {
-                    let mut port_manager = port_manager_for_callback.lock().unwrap();
+                // Send processed events through callback and output
+                for processed_event in processed_events {
+                    // Send processed event through callback
+                    if let Some(ref callback) = output_callback {
+                        callback(processed_event.clone());
+                    }
                     
-                    for (_port_id, output_port) in &mut port_manager.output_ports {
-                        if output_port.is_connected() {
-                            match output_port.send_midi(&output_data) {
-                                Ok(_) => {
-                                    sent_count += 1;
-                                }
-                                Err(_) => {
-                                    // Silent error handling
+                    // Send to output ports
+                    let output_data = processed_event.to_midi_data();
+                
+                    let send_time = std::time::Instant::now();
+                    
+                    // Send to all connected output ports
+                    let mut sent_count = 0;
+                    {
+                        let mut port_manager = port_manager_for_callback.lock().unwrap();
+                        
+                        for (_port_id, output_port) in &mut port_manager.output_ports {
+                            if output_port.is_connected() {
+                                match output_port.send_midi(&output_data) {
+                                    Ok(_) => {
+                                        sent_count += 1;
+                                    }
+                                    Err(_) => {
+                                        // Silent error handling
+                                    }
                                 }
                             }
                         }
                     }
+                    
+                    // Also process through event processor for additional logic
+                    let _ = event_processor.lock().unwrap().process_midi_data(&output_data, timestamp);
+                    
+                    let _latency = send_time.duration_since(receive_time);
                 }
-                
-                // Also process through event processor for additional logic
-                let _ = event_processor.lock().unwrap().process_midi_data(&output_data, timestamp);
-                
-                let _latency = send_time.duration_since(receive_time);
-                
-                
             }
         }));
         
@@ -356,35 +437,103 @@ impl MidiManager {
         self.is_running && (self.input_enabled || self.output_enabled)
     }
     
-    /// Применение соответствующих кривых к velocity событий
-    fn process_velocity(
+    /// Применение соответствующих кривых к velocity событий с поддержкой hi-res
+    fn process_velocity_with_hires(
         event: MidiEvent,
-        dual_curve_processor: &Arc<Mutex<crate::curve::DualCurve>>
-    ) -> MidiEvent {
+        dual_curve_processor: &Arc<Mutex<crate::curve::DualCurve>>,
+        hi_res_buffer: &Arc<Mutex<HiResBuffer>>
+    ) -> Vec<MidiEvent> {
+        let mut dual_curve = dual_curve_processor.lock().unwrap();
+        let hi_res_enabled = dual_curve.is_hi_res_enabled();
+        
         match event {
             MidiEvent::NoteOn { channel, note, velocity, timestamp } => {
-                let mut dual_curve = dual_curve_processor.lock().unwrap();
-                let processed_velocity = dual_curve.process_note_on_velocity(velocity);
-                
-                MidiEvent::NoteOn {
-                    channel,
-                    note,
-                    velocity: processed_velocity,
-                    timestamp,
+                if hi_res_enabled {
+                    // Проверяем буфер на наличие CC#88
+                    let lower_bits = hi_res_buffer.lock().unwrap().extract(channel);
+                    
+                    // В hi-res режиме ВСЕГДА обрабатываем как 14-бит
+                    // Если нет CC#88, используем LL=0
+                    let ll = lower_bits.unwrap_or(0);
+                    let hh = velocity;
+                    let velocity_14bit = crate::curve::DualCurve::combine_14bit(ll, hh);
+                    
+                    // Обрабатываем через 14-битную кривую
+                    let processed_14bit = dual_curve.process_note_on_velocity_14bit(velocity_14bit);
+                    
+                    // Разделяем обратно на LL и HH
+                    let (new_ll, new_hh) = crate::curve::DualCurve::split_14bit(processed_14bit);
+                    
+                    // Формируем выходные сообщения: CC#88 + NoteOn
+                    vec![
+                        MidiEvent::ControlChange {
+                            channel,
+                            controller: 88,
+                            value: new_ll,
+                            timestamp,
+                        },
+                        MidiEvent::NoteOn {
+                            channel,
+                            note,
+                            velocity: new_hh,
+                            timestamp,
+                        }
+                    ]
+                } else {
+                    // Hi-res выключен - обычная обработка
+                    let processed_velocity = dual_curve.process_note_on_velocity(velocity);
+                    vec![MidiEvent::NoteOn {
+                        channel,
+                        note,
+                        velocity: processed_velocity,
+                        timestamp,
+                    }]
                 }
             }
             MidiEvent::NoteOff { channel, note, velocity, timestamp } => {
-                let mut dual_curve = dual_curve_processor.lock().unwrap();
-                let processed_velocity = dual_curve.process_note_off_velocity(velocity);
-                
-                MidiEvent::NoteOff {
-                    channel,
-                    note,
-                    velocity: processed_velocity,
-                    timestamp,
+                if hi_res_enabled {
+                    // Проверяем буфер на наличие CC#88
+                    let lower_bits = hi_res_buffer.lock().unwrap().extract(channel);
+                    
+                    // В hi-res режиме ВСЕГДА обрабатываем как 14-бит
+                    // Если нет CC#88, используем LL=0
+                    let ll = lower_bits.unwrap_or(0);
+                    let hh = velocity;
+                    let velocity_14bit = crate::curve::DualCurve::combine_14bit(ll, hh);
+                    
+                    // Обрабатываем через 14-битную кривую
+                    let processed_14bit = dual_curve.process_note_off_velocity_14bit(velocity_14bit);
+                    
+                    // Разделяем обратно на LL и HH
+                    let (new_ll, new_hh) = crate::curve::DualCurve::split_14bit(processed_14bit);
+                    
+                    // Формируем выходные сообщения: CC#88 + NoteOff
+                    vec![
+                        MidiEvent::ControlChange {
+                            channel,
+                            controller: 88,
+                            value: new_ll,
+                            timestamp,
+                        },
+                        MidiEvent::NoteOff {
+                            channel,
+                            note,
+                            velocity: new_hh,
+                            timestamp,
+                        }
+                    ]
+                } else {
+                    // Hi-res выключен - обычная обработка
+                    let processed_velocity = dual_curve.process_note_off_velocity(velocity);
+                    vec![MidiEvent::NoteOff {
+                        channel,
+                        note,
+                        velocity: processed_velocity,
+                        timestamp,
+                    }]
                 }
             }
-            _ => event, // Остальные события не обрабатываем
+            _ => vec![event], // Остальные события не обрабатываем
         }
     }
     

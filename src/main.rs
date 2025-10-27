@@ -834,6 +834,31 @@ impl MidiCurvesApp {
         ui.label(egui::RichText::new("🎹 MIDI Panel").size(12.0));
         ui.add_space(3.0);
         
+        // Hi-Res MIDI toggle
+        ui.group(|ui| {
+            let mut hi_res_enabled = self.dual_curve.lock().unwrap().is_hi_res_enabled();
+            
+            if ui.checkbox(&mut hi_res_enabled, "Enable Hi-Res MIDI (14-bit)").clicked() {
+                // Обновляем состояние в dual_curve
+                self.dual_curve.lock().unwrap().set_hi_res_enabled(hi_res_enabled);
+                
+                // Обновляем в MIDI менеджере тоже (синхронизация)
+                // (dual_curve уже является Arc, поэтому изменения автоматически распространятся)
+                
+                // Сохраняем в настройки
+                self.settings_manager.set_hi_res_enabled(hi_res_enabled);
+                self.auto_save_settings();
+            }
+            
+            if hi_res_enabled {
+                ui.colored_label(egui::Color32::from_rgb(100, 200, 100), "✓ Hi-Res: 14-bit (0-16383)");
+            } else {
+                ui.colored_label(egui::Color32::from_rgb(200, 200, 100), "Standard: 7-bit (0-127)");
+            }
+        });
+        
+        ui.add_space(10.0);
+        
         // MIDI control buttons
         ui.horizontal(|ui| {
             if ui.button("🔄 Refresh").clicked() {

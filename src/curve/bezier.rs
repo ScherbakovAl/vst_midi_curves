@@ -165,6 +165,24 @@ impl BezierCurve {
         self.dirty = true;
     }
 
+    /// Проверяет является ли кривая линейной (y = x)
+    pub fn is_linear(&self) -> bool {
+        // Кривая линейная если у неё только 2 точки в позициях (0,0) и (127,127)
+        if self.control_points.len() != 2 {
+            return false;
+        }
+        
+        let p0 = self.control_points[0].position;
+        let p1 = self.control_points[1].position;
+        
+        // Проверяем что точки в правильных позициях (с небольшой погрешностью)
+        const EPSILON: f32 = 0.1;
+        (p0.0 - 0.0).abs() < EPSILON &&
+        (p0.1 - 0.0).abs() < EPSILON &&
+        (p1.0 - 127.0).abs() < EPSILON &&
+        (p1.1 - 127.0).abs() < EPSILON
+    }
+    
     /// Обеспечивает обновление кэша
     fn ensure_cache_updated(&mut self) {
         if self.dirty {
@@ -191,6 +209,20 @@ impl BezierCurve {
         self.ensure_cache_updated();
         &self.cached_lut
     }
+    
+    /// Вычисляет значение кривой в нормализованном пространстве (0.0-1.0)
+    /// Это позволяет работать с любым диапазоном значений без потери точности
+    /// ВАЖНО: Использует прямое вычисление БЕЗ кэша для сохранения 14-битной точности
+    pub fn evaluate_normalized(&mut self, normalized_x: f64) -> f64 {
+        // Масштабируем нормализованный вход к диапазону кривой
+        let curve_x = (normalized_x * 127.0) as f32;
+        
+        // Получаем значение из кривой НАПРЯМУЮ (без кэша для точности)
+        let curve_y = self.evaluate_directly(curve_x);
+        
+        // Нормализуем выход обратно к 0.0-1.0
+        (curve_y as f64) / 127.0
+    }
 }
 
 impl Default for BezierCurve {
@@ -198,7 +230,11 @@ impl Default for BezierCurve {
         Self::new()
     }
 }
+
+#[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::curve::{BezierCurve, ControlPoint};
 
     #[test]
     fn test_linear_curve() {

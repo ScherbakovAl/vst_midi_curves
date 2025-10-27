@@ -38,6 +38,9 @@ pub struct AppSettings {
     /// Дополнительные настройки приложения
     pub auto_save_enabled: bool,
     pub show_advanced_controls: bool,
+    
+    /// Режим MIDI высокого разрешения (14-бит вместо 7-бит)
+    pub hi_res_enabled: bool,
 }
 
 /// Менеджер настроек приложения
@@ -80,6 +83,7 @@ impl Default for AppSettings {
             active_curve_tab: 0,
             auto_save_enabled: true,
             show_advanced_controls: false,
+            hi_res_enabled: false,
         }
     }
 }
@@ -206,6 +210,16 @@ impl SettingsManager {
     pub fn update_gui_settings(&mut self, auto_save: bool, show_advanced: bool) {
         self.settings.auto_save_enabled = auto_save;
         self.settings.show_advanced_controls = show_advanced;
+    }
+    
+    /// Обновляет режим MIDI высокого разрешения
+    pub fn set_hi_res_enabled(&mut self, enabled: bool) {
+        self.settings.hi_res_enabled = enabled;
+    }
+    
+    /// Получает состояние режима MIDI высокого разрешения
+    pub fn is_hi_res_enabled(&self) -> bool {
+        self.settings.hi_res_enabled
     }
     
     /// Получает последний выбранный входной порт
