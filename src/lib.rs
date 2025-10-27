@@ -147,8 +147,15 @@ impl Plugin for MidiCurvesPlugin {
     const EMAIL: &'static str = "developer@vst-plugins.org";
     const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 
-    // Это MIDI плагин, используем пустой audio layout
-    const AUDIO_IO_LAYOUTS: &'static [AudioIOLayout] = &[];
+    // MIDI-only плагин: пустые аудио каналы, только MIDI обработка
+    // Некоторые DAW требуют хотя бы один layout, даже для MIDI-only плагинов
+    const AUDIO_IO_LAYOUTS: &'static [AudioIOLayout] = &[
+        AudioIOLayout {
+            main_input_channels: None,
+            main_output_channels: None,
+            ..AudioIOLayout::const_default()
+        },
+    ];
 
     // Настраиваем MIDI конфигурацию
     const MIDI_INPUT: MidiConfig = MidiConfig::Basic;
@@ -352,7 +359,11 @@ fn process(
 // Implement required traits for VST3 plugin
 impl Vst3Plugin for MidiCurvesPlugin {
     const VST3_CLASS_ID: [u8; 16] = *b"MidiCurvesVST3!!";
-    const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] = &[Vst3SubCategory::Fx];
+    // Категория для MIDI плагина - Instrument позволяет работать с MIDI данными
+    const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] = &[
+        Vst3SubCategory::Instrument,
+        Vst3SubCategory::Tools,
+    ];
 }
 
 impl ClapPlugin for MidiCurvesPlugin {

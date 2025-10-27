@@ -25,26 +25,26 @@
         <key>Name</key>
         <string>MIDI Curves</string>
         <key>ID</key>
-        <data>TWlkZEN1cnZlU1QzISE=</data>
+        <data>TWlkaUN1cnZlc1ZTVDMhIQ==</data>
         <key>Category</key>
         <string>Fx</string>
         <key>ClassFlags</key>
         <integer>0x00000000</integer>
         <key>SubCategories</key>
-        <string>Fx/MIDI</string>
+        <string>Fx|MIDI</string>
         <key>Manufacturer</key>
-        <string>Your Company</string>
+        <string>Rust VST Developer</string>
         <key>Classes</key>
         <array>
             <dict>
                 <key>CID</key>
-                <data>TWlkZEN1cnZlU1QzISE=</data>
+                <data>TWlkaUN1cnZlc1ZTVDMhIQ==</data>
                 <key>Category</key>
-                <string>kVstEffectAudioModuleClass</string>
+                <string>kVstAudioEffectClass</string>
                 <key>Name</key>
                 <string>MIDI Curves</string>
                 <key>ClassID</key>
-                <data>TWlkZEN1cnZlU1QzISE=</data>
+                <data>TWlkaUN1cnZlc1ZTVDMhIQ==</data>
                 <key>Version</key>
                 <string>0x01000000</string>
                 <key>_sdkVersion</key>
