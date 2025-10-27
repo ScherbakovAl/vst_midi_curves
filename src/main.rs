@@ -57,6 +57,11 @@ struct MidiCurvesApp {
     
     // Менеджер настроек приложения
     settings_manager: SettingsManager,
+    
+    // Состояние диалога сохранения пресета
+    show_save_preset_dialog: bool,
+    save_preset_name: String,
+    save_preset_description: String,
 }
 
 impl MidiCurvesApp {
@@ -94,6 +99,9 @@ fn new() -> Result<Self, Box<dyn std::error::Error>> {
             preset_manager,
             selected_preset: None,
             settings_manager,
+            show_save_preset_dialog: false,
+            save_preset_name: String::new(),
+            save_preset_description: String::new(),
         };
         
         // Запускаем полный MIDI менеджер
@@ -429,20 +437,74 @@ fn process_input_velocity(&self, input_velocity: u8) -> u8 {
         }
     }
     
-    // Сохранение текущей кривой как пресета
-    fn save_current_as_preset(&mut self, name: String, description: String) -> Result<(), Box<dyn std::error::Error>> {
-        let dual_curve = self.dual_curve.lock().unwrap();
+// Открывает диалог сохранения пресета
+    fn open_save_preset_dialog(&mut self) {
+        self.show_save_preset_dialog = true;
+        self.save_preset_name.clear();
+        self.save_preset_description.clear();
+    }
+    
+    // Сохранение пресета из диалога
+    fn save_preset_from_dialog(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        let trimmed_name = self.save_preset_name.trim();
         
-        let points = if self.active_tab_note_on {
-            dual_curve.note_on_curve.control_points.clone()
+        if trimmed_name.is_empty() {
+            return Err("Имя пресета не может быть пустым".into());
+        }
+        
+        // Проверяем, что пресет с таким именем не существует
+        {
+            let manager = self.preset_manager.lock().unwrap();
+            if manager.get_preset(trimmed_name).is_some() {
+                return Err(format!("Пресет с именем '{}' уже существует", trimmed_name).into());
+            }
+        }
+        
+        let name = trimmed_name.to_string();
+        let description = if self.save_preset_description.trim().is_empty() {
+            format!("Пресет {}, создан {}",
+                if self.active_tab_note_on { "NoteOn" } else { "NoteOff" },
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs()
+            )
         } else {
-            dual_curve.note_off_curve.control_points.clone()
+            self.save_preset_description.trim().to_string()
         };
         
-        let preset = CurvePreset::new(name, description, points);
+        // Получаем точки кривой заранее, чтобы избежать проблем с заимствованием
+        let points = {
+            let dual_curve = self.dual_curve.lock().unwrap();
+            if self.active_tab_note_on {
+                dual_curve.note_on_curve.control_points.clone()
+            } else {
+                dual_curve.note_off_curve.control_points.clone()
+            }
+        };
+        
+        let preset = CurvePreset::new(name.clone(), description, points);
         self.preset_manager.lock().unwrap().add_preset(preset)?;
         
+        self.selected_preset = Some(name);
+        self.show_save_preset_dialog = false;
+        
+        // Сохраняем настройки после выхода из блокировки
+        let auto_save = self.settings_manager.is_auto_save_enabled();
+        if auto_save {
+            if let Err(e) = self.save_settings() {
+                eprintln!("Ошибка автосохранения настроек: {}", e);
+            }
+        }
+        
         Ok(())
+    }
+    
+    // Закрывает диалог сохранения без сохранения
+    fn close_save_preset_dialog(&mut self) {
+        self.show_save_preset_dialog = false;
+        self.save_preset_name.clear();
+        self.save_preset_description.clear();
     }
     
 // Сброс к линейной кривой (обеих кривых)
@@ -588,6 +650,52 @@ impl eframe::App for MidiCurvesApp {
             self.draw_main_ui(ui);
         });
         
+        // Диалог сохранения пресета
+        if self.show_save_preset_dialog {
+            egui::Window::new("💾 Сохранить пресет")
+                .resizable(false)
+                .collapsible(false)
+                .default_pos(ctx.input(|i| i.pointer.hover_pos().unwrap_or(egui::pos2(400.0, 300.0))))
+                .show(ctx, |ui| {
+                    ui.label("Введите имя нового пресета:");
+                    ui.add_space(5.0);
+                    
+                    // Поле для имени
+                    ui.vertical(|ui| {
+                        ui.label("Имя пресета:");
+                        ui.add(egui::TextEdit::singleline(&mut self.save_preset_name)
+                            .desired_width(300.0)
+                            .hint_text("Мой пресет"));
+                    });
+                    
+                    ui.add_space(10.0);
+                    
+                    // Поле для описания (опционально)
+                    ui.vertical(|ui| {
+                        ui.label("Описание (необязательно):");
+    ui.add(egui::TextEdit::multiline(&mut self.save_preset_description)
+                            .desired_width(300.0)
+                            .hint_text("Описание пресета..."));
+                    });
+                    
+                    ui.add_space(15.0);
+                    
+                    // Кнопки
+                    ui.horizontal(|ui| {
+                        if ui.button("💾 Сохранить").clicked() {
+                            if let Err(e) = self.save_preset_from_dialog() {
+                                eprintln!("Ошибка сохранения пресета: {}", e);
+                                // Можно показать ошибку пользователю через отдельное поле
+                            }
+                        }
+                        
+                        if ui.button("❌ Отмена").clicked() {
+                            self.close_save_preset_dialog();
+                        }
+                    });
+                });
+        }
+        
         // Обычная перерисовка при необходимости (убираем принудительное)
         // ctx.request_repaint();
     }
@@ -648,12 +756,14 @@ impl MidiCurvesApp {
         
         // Основной layout с горизонтальным разделением
         ui.horizontal(|ui| {
+            // Определяем тип кривой для использования в обеих панелях
+            let curve_type = if self.active_tab_note_on { "NoteOn" } else { "NoteOff" };
+            
             // Левая часть - график с подписью и управлением
             ui.vertical(|ui| {
                 ui.set_min_width(600.0);
                 
                 // Заголовок графика
-                let curve_type = if self.active_tab_note_on { "NoteOn" } else { "NoteOff" };
                 ui.label(egui::RichText::new(format!("🎯 {} Curve Editor", curve_type)).size(16.0));
                 
                 // Область графика
@@ -668,6 +778,8 @@ impl MidiCurvesApp {
                 
                 // Отрисовка кривой
                 self.draw_curve(&painter, response.rect);
+                
+                // Убираем информацию о точках из левой панели - теперь она будет в правой панели
                 
                 ui.add_space(10.0);
                 
@@ -688,72 +800,37 @@ impl MidiCurvesApp {
                         };
                         ui.label(format_str);
                     }
-                } else {
-                    ui.label(format!("🎯 No point selected for {} curve - click on curve to select", curve_type));
-                }
-                
-                ui.add_space(5.0);
-                
-                // Инструкции для работы с кривой
-                ui.label(egui::RichText::new("Double click - add point. Right click - delete point").size(12.0));
-                
-                // Индикация режима тонкого перемещения
-                if self.shift_pressed {
-                    ui.colored_label(
-                        egui::Color32::from_rgb(100, 200, 100),
-                        "🔧 FINE MODE: Shift held - precise positioning (0.01 increments)"
-                    );
-                } else {
-                    ui.colored_label(
-                        egui::Color32::from_gray(120),
-                        "💫 Hold Shift for fine control (0.01 increments)"
-                    );
-                }
-                
-                ui.add_space(5.0);
-                
-                // Кнопки управления
-                ui.horizontal(|ui| {
-                    if ui.button("🔄 Reset to Linear").clicked() {
-                        self.reset_curve();
-                    }
-                });
-                
-                ui.add_space(5.0);
-                
-                // Информация о текущих точках
-                let dual_curve = self.dual_curve.lock().unwrap();
-                let points_count = if self.active_tab_note_on {
-                    dual_curve.note_on_curve.control_points.len()
-                } else {
-                    dual_curve.note_off_curve.control_points.len()
-                };
-                ui.label(format!("📊 Total Points in {} Curve: {}", curve_type, points_count));
-                
-                // Список точек для активной кривой
-                let points = if self.active_tab_note_on {
-                    &dual_curve.note_on_curve.control_points
-                } else {
-                    &dual_curve.note_off_curve.control_points
-                };
-                
-                if !points.is_empty() {
-                    egui::ScrollArea::vertical()
-                        .max_height(100.0)
-                        .show(ui, |ui| {
-                            ui.label(format!("📋 {} Curve Point List:", curve_type));
-                            for (i, point) in points.iter().enumerate() {
-                                let marker = if Some(i) == self.selected_point { "▶ " } else { "• " };
-                                let coord_format = if self.shift_pressed {
-                                    format!("{:.2}, {:.2}", point.position.0, point.position.1)
-                                } else {
-                                    format!("{:.1}, {:.1}", point.position.0, point.position.1)
-                                };
-                                ui.label(format!("{}Point {}: ({})", marker, i, coord_format));
-                            }
-                        });
-                }
-            });
+} else {
+    ui.label(format!("🎯 No point selected for {} curve - click on curve to select", curve_type));
+}
+
+ui.add_space(5.0);
+
+// Инструкции для работы с кривой
+ui.label(egui::RichText::new("Double click - add point. Right click - delete point").size(12.0));
+
+// Индикация режима тонкого перемещения
+if self.shift_pressed {
+    ui.colored_label(
+        egui::Color32::from_rgb(100, 200, 100),
+        "🔧 FINE MODE: Shift held - precise positioning (0.01 increments)"
+    );
+} else {
+    ui.colored_label(
+        egui::Color32::from_gray(120),
+        "💫 Hold Shift for fine control (0.01 increments)"
+    );
+}
+
+ui.add_space(5.0);
+
+// Кнопки управления
+ui.horizontal(|ui| {
+    if ui.button("🔄 Reset to Linear").clicked() {
+        self.reset_curve();
+    }
+});
+});
 
             // Правая часть - панели
             ui.vertical(|ui| {
@@ -835,7 +912,7 @@ impl MidiCurvesApp {
         }
     }
     
-    fn draw_presets_panel(&mut self, ui: &mut egui::Ui) {
+fn draw_presets_panel(&mut self, ui: &mut egui::Ui) {
         ui.label(egui::RichText::new("📁 Presets").size(14.0));
         ui.add_space(5.0);
         
@@ -853,20 +930,35 @@ impl MidiCurvesApp {
         
         // Preset control buttons
         ui.horizontal(|ui| {
-            if ui.button("Load").clicked() {
-                if !preset_names.is_empty() {
-                    self.load_preset(&preset_names[0]);
-                }
+            // Кнопка Save теперь открывает диалог
+            if ui.button("💾 Save").clicked() {
+                self.open_save_preset_dialog();
             }
             
-            if ui.button("Save").clicked() {
-                // TODO: Show save dialog
-            }
-            
-            if ui.button("Delete").clicked() {
+// Кнопка Delete остается
+            if ui.button("🗑️ Delete").clicked() {
                 if let Some(selected_preset) = &self.selected_preset {
-                    if let Err(e) = self.preset_manager.lock().unwrap().remove_preset(selected_preset) {
-                        eprintln!("Preset deletion error: {}", e);
+                    let should_auto_save = {
+                        let mut manager = self.preset_manager.lock().unwrap();
+                        let result = manager.remove_preset(selected_preset);
+                        if let Err(e) = result {
+                            eprintln!("Ошибка удаления пресета: {}", e);
+                            false
+                        } else {
+                            true
+                        }
+                    };
+                    
+                    if should_auto_save {
+                        self.selected_preset = None;
+                        
+                        // Сохраняем настройки после выхода из блокировки
+                        let auto_save = self.settings_manager.is_auto_save_enabled();
+                        if auto_save {
+                            if let Err(e) = self.save_settings() {
+                                eprintln!("Ошибка автосохранения настроек: {}", e);
+                            }
+                        }
                     }
                 }
             }
@@ -879,12 +971,25 @@ impl MidiCurvesApp {
         egui::ScrollArea::vertical()
             .max_height(120.0)
             .show(ui, |ui| {
-                for preset_name in preset_names {
-                    let is_selected = self.selected_preset.as_ref() == Some(&preset_name);
-                    if ui.selectable_label(is_selected, &preset_name).clicked() {
-                        self.selected_preset = Some(preset_name.clone());
-                        // Загружаем пресет сразу при клике на название
-                        self.load_preset(&preset_name);
+                if preset_names.is_empty() {
+                    ui.colored_label(
+                        egui::Color32::from_gray(120),
+                        "Нет сохраненных пресетов"
+                    );
+                } else {
+                    for preset_name in preset_names {
+                        let is_selected = self.selected_preset.as_ref() == Some(&preset_name);
+                        let label_text = if is_selected {
+                            format!("🎯 {}", preset_name)
+                        } else {
+                            preset_name.clone()
+                        };
+                        
+                        if ui.selectable_label(is_selected, label_text).clicked() {
+                            self.selected_preset = Some(preset_name.clone());
+                            // Загружаем пресет сразу при клике на название
+                            self.load_preset(&preset_name);
+                        }
                     }
                 }
             });
@@ -1097,7 +1202,7 @@ impl MidiCurvesApp {
         }
         
         // Сохранение настроек при отпускании кнопки мыши (drag release)
-        if response.drag_released() && self.is_dragging {
+        if response.drag_stopped() && self.is_dragging {
             // Мышь отпущена - сохраняем настройки
             self.is_dragging = false;
             self.auto_save_settings();
