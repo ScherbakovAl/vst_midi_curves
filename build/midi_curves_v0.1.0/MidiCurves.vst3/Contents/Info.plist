@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleExecutable</key>
+    <string>MidiCurves</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.yourcompany.midicurves</string>
+    <key>CFBundleName</key>
+    <string>MIDI Curves</string>
+    <key>CFBundleDisplayName</key>
+    <string>MIDI Curves</string>
+    <key>CFBundleVersion</key>
+    <string>0.1.0</string>
+    <key>CFBundleShortVersionString</key>
+    <string>0.1.0</string>
+    <key>CFBundleSignature</key>
+    <string>????</string>
+    <key>CFBundlePackageType</key>
+    <string>BNDL</string>
+    <key>VST</key>
+    <dict>
+        <key>Version</key>
+        <string>0x01000000</string>
+        <key>Name</key>
+        <string>MIDI Curves</string>
+        <key>ID</key>
+        <data>MmlkaUN1cnZlU1QyIQ==</data>
+        <key>Category</key>
+        <integer>0</integer>
+        <key>HasClip</key>
+        <false/>
+        <key>HasVu</key>
+        <false/>
+        <key>IsSynth</key>
+        <true/>
+        <key>CanMidiProcessEventChords</key>
+        <false/>
+    </dict>
+    <key>VST3</key>
+    <dict>
+        <key>Version</key>
+        <string>0x01000000</string>
+        <key>Name</key>
+        <string>MIDI Curves</string>
+        <key>ID</key>
+        <data>MmlkaUN1cnZlU1QyIQ==</data>
+        <key>Category</key>
+        <string>Instrument</string>
+        <key>ClassFlags</key>
+        <integer>0x00000001</integer>
+        <key>SubCategories</key>
+        <string>Instrument</string>
+        <key>Manufacturer</key>
+        <string>Your Company</string>
+        <key>Classes</key>
+        <array>
+            <dict>
+                <key>CID</key>
+                <data>MmlkaUN1cnZlU1QyIQ==</data>
+                <key>Category</key>
+                <string>kVstProcessContextCategory</string>
+                <key>Name</key>
+                <string>MIDI Curves</string>
+                <key>ClassID</key>
+                <data>MmlkaUN1cnZlU1QyIQ==</data>
+                <key>Version</key>
+                <string>0x01000000</string>
+                <key>_sdkVersion</key>
+                <string>VST 3.0</string>
+            </dict>
+        </array>
+    </dict>
+</dict>
+</plist>
