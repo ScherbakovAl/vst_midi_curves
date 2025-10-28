@@ -101,6 +101,7 @@ struct GuiState {
     selected_point: Option<usize>,
     is_dragging: bool,
     last_mouse_pos: Option<egui::Pos2>,
+    active_tab_note_on: bool, // true для NoteOn, false для NoteOff
 }
 
 impl Default for GuiState {
@@ -109,6 +110,7 @@ impl Default for GuiState {
             selected_point: None,
             is_dragging: false,
             last_mouse_pos: None,
+            active_tab_note_on: true, // По умолчанию NoteOn
         }
     }
 }
@@ -197,31 +199,35 @@ fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Edi
     let dual_curve_processor = self.dual_curve_processor.clone();
     let gui_state = self.gui_state.clone();
     let preset_manager = self.preset_manager.clone();
-    let settings_manager = self.settings_manager.clone();
     
     create_egui_editor(
         EguiState::from_size(1000, 650),
         (),
         |_, _| {},
         move |egui_ctx, _setter, _state| {
-            // Устанавливаем курсор по умолчанию сразу при каждой отрисовке
-            egui_ctx.set_cursor_icon(egui::CursorIcon::Default);
-            
             egui::CentralPanel::default().show(egui_ctx, |ui| {
+                // Получаем активную вкладку один раз в начале
+                let active_tab_note_on = {
+                    let state = gui_state.lock().unwrap();
+                    state.active_tab_note_on
+                };
+                
                 // Заголовок
                 ui.horizontal(|ui| {
                     ui.heading("🎵 MIDI Curves VST3");
                     ui.add_space(20.0);
                     
                     // Переключатель кривых NoteOn/NoteOff
-                    let mut active_note_on = gui_state.lock().unwrap().last_mouse_pos.is_none(); // Временное решение, добавим флаг позже
-                    
                     ui.label("Curve Type:");
-                    if ui.selectable_label(active_note_on, "🎵 NoteOn").clicked() {
-                        active_note_on = true;
+                    if ui.selectable_label(active_tab_note_on, "🎵 NoteOn").clicked() {
+                        let mut state = gui_state.lock().unwrap();
+                        state.active_tab_note_on = true;
+                        state.selected_point = None;
                     }
-                    if ui.selectable_label(!active_note_on, "🔇 NoteOff").clicked() {
-                        active_note_on = false;
+                    if ui.selectable_label(!active_tab_note_on, "🔇 NoteOff").clicked() {
+                        let mut state = gui_state.lock().unwrap();
+                        state.active_tab_note_on = false;
+                        state.selected_point = None;
                     }
                 });
                 
@@ -235,12 +241,12 @@ fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Edi
                         
                         ui.label("🎯 Curve Editor");
                         ui.add_space(5.0);
-                // Создаем canvas для отрисовки
-                let available_size = ui.available_size();
-                let (response, painter) = ui.allocate_painter(
-                    available_size,
-                    egui::Sense::click_and_drag(),
-                );
+                        
+                        // Создаем canvas для отрисовки с фиксированным размером
+                        let (response, painter) = ui.allocate_painter(
+                            egui::vec2(600.0, 400.0),
+                            egui::Sense::click_and_drag(),
+                        );
                 
                 let rect = response.rect;
                 
@@ -261,85 +267,114 @@ fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Edi
                 painter.rect_filled(graph_rect, 0.0, egui::Color32::from_rgb(25, 25, 35));
                 
                 // ОБРАБОТКА ВЗАИМОДЕЙСТВИЯ С МЫШЬЮ
-                {
-                    let mut gui_state_mut = gui_state.lock().unwrap();
+                // Поиск точки под курсором
+                let hover_point: Option<usize> = if let Some(hover_pos) = response.hover_pos() {
+                    const CLICK_RADIUS: f32 = 12.0;
+                    let curve = dual_curve_processor.lock().unwrap();
                     
-                    // При входе курсора в область - сбрасываем курсор к виду по умолчанию
-                    if response.hovered() {
-                        // Сначала всегда устанавливаем курсор по умолчанию
+                    let control_points = if active_tab_note_on {
+                        &curve.note_on_curve.control_points
+                    } else {
+                        &curve.note_off_curve.control_points
+                    };
+                    
+                    let mut result = None;
+                    for (i, point) in control_points.iter().enumerate() {
+                        let screen_x = graph_rect.left() + (point.position.0 / 127.0) * graph_rect.width();
+                        let screen_y = graph_rect.bottom() - (point.position.1 / 127.0) * graph_rect.height();
+                        let screen_pos = egui::pos2(screen_x, screen_y);
+                        
+                        if hover_pos.distance(screen_pos) < CLICK_RADIUS {
+                            result = Some(i);
+                            break;
+                        }
+                    }
+                    result
+                } else {
+                    None
+                };
+                
+                // Обработка курсора
+                if response.hovered() {
+                    let is_dragging = {
+                        let state = gui_state.lock().unwrap();
+                        response.dragged() && state.selected_point.is_some()
+                    };
+                    
+                    if is_dragging {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+                    } else if hover_point.is_some() {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                    } else {
                         ui.ctx().set_cursor_icon(egui::CursorIcon::Default);
                     }
-                    
-                    // Поиск точки под курсором для установки курсора
-                    let mut hover_point: Option<usize> = None;
-                    if let Some(hover_pos) = response.hover_pos() {
-                        const CLICK_RADIUS: f32 = 12.0;
-                        let curve = dual_curve_processor.lock().unwrap();
+                }
+                
+                // Клик для выбора точки
+                if response.clicked() {
+                    let mut state = gui_state.lock().unwrap();
+                    state.selected_point = hover_point;
+                }
+                
+                // Правая кнопка для удаления
+                if response.secondary_clicked() {
+                    if let Some(point_index) = hover_point {
+                        let mut curve = dual_curve_processor.lock().unwrap();
+                        let mut state = gui_state.lock().unwrap();
                         
-                        for (i, point) in curve.note_on_curve.control_points.iter().enumerate() {
-                            let screen_x = graph_rect.left() + (point.position.0 / 127.0) * graph_rect.width();
-                            let screen_y = graph_rect.bottom() - (point.position.1 / 127.0) * graph_rect.height();
-                            let screen_pos = egui::pos2(screen_x, screen_y);
-                            
-                            if hover_pos.distance(screen_pos) < CLICK_RADIUS {
-                                hover_point = Some(i);
-                                break;
-                            }
-                        }
-                    }
-                    
-                    // Затем, если нужно, переопределяем курсор в зависимости от контекста
-                    if response.hovered() {
-                        if response.dragged() && gui_state_mut.selected_point.is_some() {
-                            ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
-                        } else if hover_point.is_some() {
-                            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-                        }
-                    }
-                    
-                    // Клик левой кнопкой для выбора точки
-                    if response.clicked() {
-                        gui_state_mut.selected_point = hover_point;
-                    }
-                    
-                    // Правая кнопка мыши для удаления точки
-                    if response.secondary_clicked() {
-                        if let Some(point_index) = hover_point {
-                            let mut curve = dual_curve_processor.lock().unwrap();
-                            // Удаляем только если точек больше 2 (минимум для кривой)
-                            if curve.note_on_curve.control_points.len() > 2 {
+                        let can_remove = if active_tab_note_on {
+                            curve.note_on_curve.control_points.len() > 2
+                        } else {
+                            curve.note_off_curve.control_points.len() > 2
+                        };
+                        
+                        if can_remove {
+                            if active_tab_note_on {
                                 curve.remove_note_on_point(point_index);
-                                // Сбрасываем выделение если удалили выбранную точку
-                                if gui_state_mut.selected_point == Some(point_index) {
-                                    gui_state_mut.selected_point = None;
-                                }
+                            } else {
+                                curve.remove_note_off_point(point_index);
+                            }
+                            
+                            if state.selected_point == Some(point_index) {
+                                state.selected_point = None;
                             }
                         }
                     }
+                }
+                
+                // Перетаскивание
+                if response.dragged() {
+                    let selected_index = {
+                        let state = gui_state.lock().unwrap();
+                        state.selected_point
+                    };
                     
-                    // Перетаскивание точки
-                    if response.dragged() {
-                        if let Some(selected_index) = gui_state_mut.selected_point {
-                            if let Some(hover_pos) = response.hover_pos() {
-                                // Конвертируем экранные координаты в мировые
-                                let world_x = ((hover_pos.x - graph_rect.left()) / graph_rect.width() * 127.0).clamp(0.0, 127.0);
-                                let world_y = ((graph_rect.bottom() - hover_pos.y) / graph_rect.height() * 127.0).clamp(0.0, 127.0);
-                                
-                                // Обновляем позицию точки
-                                let mut curve = dual_curve_processor.lock().unwrap();
-                                curve.update_note_on_point(selected_index, (world_x, world_y));
-                            }
-                        }
-                    }
-                    
-                    // Двойной клик для добавления точки
-                    if response.double_clicked() {
+                    if let Some(selected_index) = selected_index {
                         if let Some(hover_pos) = response.hover_pos() {
                             let world_x = ((hover_pos.x - graph_rect.left()) / graph_rect.width() * 127.0).clamp(0.0, 127.0);
                             let world_y = ((graph_rect.bottom() - hover_pos.y) / graph_rect.height() * 127.0).clamp(0.0, 127.0);
                             
                             let mut curve = dual_curve_processor.lock().unwrap();
+                            if active_tab_note_on {
+                                curve.update_note_on_point(selected_index, (world_x, world_y));
+                            } else {
+                                curve.update_note_off_point(selected_index, (world_x, world_y));
+                            }
+                        }
+                    }
+                }
+                
+                // Двойной клик для добавления
+                if response.double_clicked() {
+                    if let Some(hover_pos) = response.hover_pos() {
+                        let world_x = ((hover_pos.x - graph_rect.left()) / graph_rect.width() * 127.0).clamp(0.0, 127.0);
+                        let world_y = ((graph_rect.bottom() - hover_pos.y) / graph_rect.height() * 127.0).clamp(0.0, 127.0);
+                        
+                        let mut curve = dual_curve_processor.lock().unwrap();
+                        if active_tab_note_on {
                             curve.add_note_on_point((world_x, world_y));
+                        } else {
+                            curve.add_note_off_point((world_x, world_y));
                         }
                     }
                 }
@@ -374,11 +409,22 @@ fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Edi
                 
                         // Отрисовка кривой
                         let mut curve = dual_curve_processor.lock().unwrap();
-                        if curve.note_on_curve.control_points.len() >= 2 {
+                        let selected_point = {
+                            let state = gui_state.lock().unwrap();
+                            state.selected_point
+                        };
+                        
+                        let active_curve = if active_tab_note_on {
+                            &mut curve.note_on_curve
+                        } else {
+                            &mut curve.note_off_curve
+                        };
+                        
+                        if active_curve.control_points.len() >= 2 {
                             let mut curve_points = Vec::new();
                             for i in 0..=128 {
                                 let x_input = i as f32;
-                                let y_output = curve.note_on_curve.evaluate(x_input);
+                                let y_output = active_curve.evaluate(x_input);
                                 
                                 let screen_x = graph_rect.left() + (x_input / 127.0) * graph_rect.width();
                                 let screen_y = graph_rect.bottom() - (y_output / 127.0) * graph_rect.height();
@@ -387,20 +433,25 @@ fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Edi
                             }
                             
                             if curve_points.len() >= 2 {
+                                let curve_color = if active_tab_note_on {
+                                    egui::Color32::from_rgb(100, 200, 255)
+                                } else {
+                                    egui::Color32::from_rgb(255, 150, 100)
+                                };
+                                
                                 painter.add(egui::Shape::line(
                                     curve_points,
-                                    egui::Stroke::new(3.0, egui::Color32::from_rgb(100, 200, 255))
+                                    egui::Stroke::new(3.0, curve_color)
                                 ));
                             }
                             
                             // Контрольные точки
-                            let gui_state_lock = gui_state.lock().unwrap();
-                            for (i, point) in curve.note_on_curve.control_points.iter().enumerate() {
+                            for (i, point) in active_curve.control_points.iter().enumerate() {
                                 let screen_x = graph_rect.left() + (point.position.0 / 127.0) * graph_rect.width();
                                 let screen_y = graph_rect.bottom() - (point.position.1 / 127.0) * graph_rect.height();
                                 let screen_pos = egui::pos2(screen_x, screen_y);
                                 
-                                let color = if Some(i) == gui_state_lock.selected_point {
+                                let color = if Some(i) == selected_point {
                                     egui::Color32::from_rgb(255, 100, 100)
                                 } else {
                                     egui::Color32::from_rgb(255, 150, 150)
@@ -414,18 +465,33 @@ fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Edi
                         ui.add_space(5.0);
                         
                         // Информация о выбранной точке
-                        if let Some(index) = gui_state.lock().unwrap().selected_point {
+                        let selected_point = {
+                            let state = gui_state.lock().unwrap();
+                            state.selected_point
+                        };
+                        
+                        if let Some(index) = selected_point {
                             let curve = dual_curve_processor.lock().unwrap();
-                            if let Some(point) = curve.note_on_curve.control_points.get(index) {
+                            
+                            let control_points = if active_tab_note_on {
+                                &curve.note_on_curve.control_points
+                            } else {
+                                &curve.note_off_curve.control_points
+                            };
+                            
+                            if let Some(point) = control_points.get(index) {
+                                let curve_type = if active_tab_note_on { "NoteOn" } else { "NoteOff" };
                                 ui.label(format!(
-                                    "🎯 Selected Point {}: ({:.1}, {:.1})",
+                                    "🎯 Selected Point {} ({}): ({:.1}, {:.1})",
                                     index,
+                                    curve_type,
                                     point.position.0,
                                     point.position.1
                                 ));
                             }
                         } else {
-                            ui.label("🎯 No point selected - click to select");
+                            let curve_type = if active_tab_note_on { "NoteOn" } else { "NoteOff" };
+                            ui.label(format!("🎯 No point selected ({}) - click to select", curve_type));
                         }
                         
                         ui.label("Double click - add point | Right click - delete point");
@@ -485,8 +551,16 @@ fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Edi
                             ui.label("🎛️ Controls");
                             
                             if ui.button("🔄 Reset to Linear").clicked() {
-                                dual_curve_processor.lock().unwrap().reset_to_linear();
-                                gui_state.lock().unwrap().selected_point = None;
+                                let mut curve = dual_curve_processor.lock().unwrap();
+                                
+                                if active_tab_note_on {
+                                    curve.note_on_curve.reset_to_linear();
+                                } else {
+                                    curve.note_off_curve.reset_to_linear();
+                                }
+                                
+                                let mut state = gui_state.lock().unwrap();
+                                state.selected_point = None;
                             }
                         });
                         
@@ -499,7 +573,15 @@ fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Edi
                             ui.label("Platform: VST3");
                             
                             let curve = dual_curve_processor.lock().unwrap();
-                            ui.label(format!("Control Points: {}", curve.note_on_curve.control_points.len()));
+                            
+                            let point_count = if active_tab_note_on {
+                                curve.note_on_curve.control_points.len()
+                            } else {
+                                curve.note_off_curve.control_points.len()
+                            };
+                            
+                            let curve_type = if active_tab_note_on { "NoteOn" } else { "NoteOff" };
+                            ui.label(format!("Control Points ({}): {}", curve_type, point_count));
                         });
                     });
                 });
