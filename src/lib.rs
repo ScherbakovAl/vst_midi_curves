@@ -196,9 +196,11 @@ fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Edi
     // Клонируем Arc для использования в замыкании
     let dual_curve_processor = self.dual_curve_processor.clone();
     let gui_state = self.gui_state.clone();
+    let preset_manager = self.preset_manager.clone();
+    let settings_manager = self.settings_manager.clone();
     
     create_egui_editor(
-        EguiState::from_size(800, 600),
+        EguiState::from_size(1000, 650),
         (),
         |_, _| {},
         move |egui_ctx, _setter, _state| {
@@ -206,6 +208,33 @@ fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Edi
             egui_ctx.set_cursor_icon(egui::CursorIcon::Default);
             
             egui::CentralPanel::default().show(egui_ctx, |ui| {
+                // Заголовок
+                ui.horizontal(|ui| {
+                    ui.heading("🎵 MIDI Curves VST3");
+                    ui.add_space(20.0);
+                    
+                    // Переключатель кривых NoteOn/NoteOff
+                    let mut active_note_on = gui_state.lock().unwrap().last_mouse_pos.is_none(); // Временное решение, добавим флаг позже
+                    
+                    ui.label("Curve Type:");
+                    if ui.selectable_label(active_note_on, "🎵 NoteOn").clicked() {
+                        active_note_on = true;
+                    }
+                    if ui.selectable_label(!active_note_on, "🔇 NoteOff").clicked() {
+                        active_note_on = false;
+                    }
+                });
+                
+                ui.add_space(10.0);
+                
+                // Основной layout
+                ui.horizontal(|ui| {
+                    // Левая часть - график
+                    ui.vertical(|ui| {
+                        ui.set_min_width(650.0);
+                        
+                        ui.label("🎯 Curve Editor");
+                        ui.add_space(5.0);
                 // Создаем canvas для отрисовки
                 let available_size = ui.available_size();
                 let (response, painter) = ui.allocate_painter(
@@ -343,44 +372,137 @@ fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Edi
                     egui::Stroke::new(2.0, axis_color),
                 );
                 
-                // Отрисовка кривой
-                let mut curve = dual_curve_processor.lock().unwrap();
-                if curve.note_on_curve.control_points.len() >= 2 {
-                    let mut curve_points = Vec::new();
-                    for i in 0..=128 {
-                        let x_input = i as f32;
-                        let y_output = curve.note_on_curve.evaluate(x_input);
+                        // Отрисовка кривой
+                        let mut curve = dual_curve_processor.lock().unwrap();
+                        if curve.note_on_curve.control_points.len() >= 2 {
+                            let mut curve_points = Vec::new();
+                            for i in 0..=128 {
+                                let x_input = i as f32;
+                                let y_output = curve.note_on_curve.evaluate(x_input);
+                                
+                                let screen_x = graph_rect.left() + (x_input / 127.0) * graph_rect.width();
+                                let screen_y = graph_rect.bottom() - (y_output / 127.0) * graph_rect.height();
+                                
+                                curve_points.push(egui::pos2(screen_x, screen_y));
+                            }
+                            
+                            if curve_points.len() >= 2 {
+                                painter.add(egui::Shape::line(
+                                    curve_points,
+                                    egui::Stroke::new(3.0, egui::Color32::from_rgb(100, 200, 255))
+                                ));
+                            }
+                            
+                            // Контрольные точки
+                            let gui_state_lock = gui_state.lock().unwrap();
+                            for (i, point) in curve.note_on_curve.control_points.iter().enumerate() {
+                                let screen_x = graph_rect.left() + (point.position.0 / 127.0) * graph_rect.width();
+                                let screen_y = graph_rect.bottom() - (point.position.1 / 127.0) * graph_rect.height();
+                                let screen_pos = egui::pos2(screen_x, screen_y);
+                                
+                                let color = if Some(i) == gui_state_lock.selected_point {
+                                    egui::Color32::from_rgb(255, 100, 100)
+                                } else {
+                                    egui::Color32::from_rgb(255, 150, 150)
+                                };
+                                
+                                painter.circle_filled(screen_pos, 6.0, color);
+                                painter.circle_stroke(screen_pos, 6.0, egui::Stroke::new(1.0, egui::Color32::BLACK));
+                            }
+                        }
                         
-                        let screen_x = graph_rect.left() + (x_input / 127.0) * graph_rect.width();
-                        let screen_y = graph_rect.bottom() - (y_output / 127.0) * graph_rect.height();
+                        ui.add_space(5.0);
                         
-                        curve_points.push(egui::pos2(screen_x, screen_y));
-                    }
-                    
-                    if curve_points.len() >= 2 {
-                        painter.add(egui::Shape::line(
-                            curve_points,
-                            egui::Stroke::new(3.0, egui::Color32::from_rgb(100, 200, 255))
-                        ));
-                    }
-                    
-                    // Контрольные точки
-                    let gui_state_lock = gui_state.lock().unwrap();
-                    for (i, point) in curve.note_on_curve.control_points.iter().enumerate() {
-                        let screen_x = graph_rect.left() + (point.position.0 / 127.0) * graph_rect.width();
-                        let screen_y = graph_rect.bottom() - (point.position.1 / 127.0) * graph_rect.height();
-                        let screen_pos = egui::pos2(screen_x, screen_y);
-                        
-                        let color = if Some(i) == gui_state_lock.selected_point {
-                            egui::Color32::from_rgb(255, 100, 100)
+                        // Информация о выбранной точке
+                        if let Some(index) = gui_state.lock().unwrap().selected_point {
+                            let curve = dual_curve_processor.lock().unwrap();
+                            if let Some(point) = curve.note_on_curve.control_points.get(index) {
+                                ui.label(format!(
+                                    "🎯 Selected Point {}: ({:.1}, {:.1})",
+                                    index,
+                                    point.position.0,
+                                    point.position.1
+                                ));
+                            }
                         } else {
-                            egui::Color32::from_rgb(255, 150, 150)
-                        };
+                            ui.label("🎯 No point selected - click to select");
+                        }
                         
-                        painter.circle_filled(screen_pos, 6.0, color);
-                        painter.circle_stroke(screen_pos, 6.0, egui::Stroke::new(1.0, egui::Color32::BLACK));
-                    }
-                }
+                        ui.label("Double click - add point | Right click - delete point");
+                    });
+                    
+                    ui.add_space(10.0);
+                    
+                    // Правая часть - панели управления
+                    ui.vertical(|ui| {
+                        ui.set_min_width(300.0);
+                        
+                        // Панель Hi-Res MIDI
+                        ui.group(|ui| {
+                            ui.label("⚙️ MIDI Settings");
+                            
+                            let mut hi_res_enabled = dual_curve_processor.lock().unwrap().is_hi_res_enabled();
+                            
+                            if ui.checkbox(&mut hi_res_enabled, "Enable Hi-Res MIDI (14-bit)").clicked() {
+                                dual_curve_processor.lock().unwrap().set_hi_res_enabled(hi_res_enabled);
+                            }
+                            
+                            if hi_res_enabled {
+                                ui.colored_label(egui::Color32::from_rgb(100, 200, 100), "✓ Hi-Res: 14-bit (0-16383)");
+                                ui.label("Format: CC#88 (LL) + NoteOn/Off (HH)");
+                            } else {
+                                ui.colored_label(egui::Color32::from_rgb(200, 200, 100), "Standard: 7-bit (0-127)");
+                            }
+                        });
+                        
+                        ui.add_space(10.0);
+                        
+                        // Панель пресетов
+                        ui.group(|ui| {
+                            ui.label("📁 Presets");
+                            
+                            let preset_names = preset_manager.lock().unwrap().get_preset_names();
+                            
+                            ui.label("Available Presets:");
+                            egui::ScrollArea::vertical()
+                                .max_height(150.0)
+                                .show(ui, |ui| {
+                                    for preset_name in preset_names {
+                                        if ui.button(&preset_name).clicked() {
+                                            let mut curve = dual_curve_processor.lock().unwrap();
+                                            if let Some(preset) = preset_manager.lock().unwrap().get_preset(&preset_name) {
+                                                curve.load_from_preset(&preset);
+                                            }
+                                        }
+                                    }
+                                });
+                        });
+                        
+                        ui.add_space(10.0);
+                        
+                        // Кнопки управления
+                        ui.group(|ui| {
+                            ui.label("🎛️ Controls");
+                            
+                            if ui.button("🔄 Reset to Linear").clicked() {
+                                dual_curve_processor.lock().unwrap().reset_to_linear();
+                                gui_state.lock().unwrap().selected_point = None;
+                            }
+                        });
+                        
+                        ui.add_space(10.0);
+                        
+                        // Информация
+                        ui.group(|ui| {
+                            ui.label("ℹ️ Info");
+                            ui.label(format!("Version: {}", env!("CARGO_PKG_VERSION")));
+                            ui.label("Platform: VST3");
+                            
+                            let curve = dual_curve_processor.lock().unwrap();
+                            ui.label(format!("Control Points: {}", curve.note_on_curve.control_points.len()));
+                        });
+                    });
+                });
             });
         },
     )
