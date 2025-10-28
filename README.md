@@ -1,4 +1,5 @@
-# 🎵 VST3 MIDI Curves - Build and Usage
+EADME.md</path>
+<content"># 🎵 VST3 MIDI Curves - Build and Usage
 
 ## 📄 License
 
@@ -11,6 +12,12 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ✅ **Cross-platform build** - Windows, macOS, Linux  
 ✅ **Automatic build scripts** - One command for any platform  
 ✅ **Detailed documentation** - BUILD_GUIDE.md with instructions  
+
+
+## 🎥 Video Demo
+
+- **YouTube**: [VST3 MIDI Curves Plugin Demo](https://www.youtube.com/watch?v=CtjtueLHJKM)
+
 
 ## 🚀 Quick Start
 
@@ -149,11 +156,8 @@ sudo apt install libgtk-4-dev libssl-dev libasound2-dev libudev-dev
 - **ARCHITECTURE.md** - Project architecture
 - **Cargo.toml** - Configuration and dependencies
 
-## 🎥 Video Demo
 
-- **YouTube**: [VST3 MIDI Curves Plugin Demo](https://www.youtube.com/watch?v=CtjtueLHJKM)
-
-## � Result
+## 🎯 Result
 
 You got:
 - ✅ **Working standalone application** with full GUI
