@@ -30,10 +30,15 @@ struct MidiCurvesParams {
 }
 
 /// Буфер для hi-res MIDI сообщений в VST (CC#88 + NoteOn/Off)
+/// Идентичен HiResBuffer из standalone версии
 #[derive(Debug, Clone)]
 struct VstHiResBuffer {
+    /// Канал для которого буферизуем
     channel: Option<u8>,
+    /// Младшие 7 бит (из CC#88)
     lower_bits: Option<u8>,
+    /// Время получения CC#88 для проверки таймаута
+    timestamp: Option<std::time::Instant>,
 }
 
 impl VstHiResBuffer {
@@ -41,28 +46,43 @@ impl VstHiResBuffer {
         Self {
             channel: None,
             lower_bits: None,
+            timestamp: None,
         }
     }
     
+    /// Сохраняет CC#88 сообщение (как в standalone)
     fn store_cc88(&mut self, channel: u8, lower_bits: u8) {
         self.channel = Some(channel);
         self.lower_bits = Some(lower_bits);
+        self.timestamp = Some(std::time::Instant::now());
     }
     
+    /// Извлекает буферизованное значение если доступно, канал совпадает и не истек таймаут
+    /// ВАЖНО: Идентично standalone версии с проверкой таймаута 100мс
     fn extract(&mut self, channel: u8) -> Option<u8> {
         if let (Some(buffered_channel), Some(lower)) = (self.channel, self.lower_bits) {
+            // Проверяем что канал совпадает
             if buffered_channel == channel {
-                self.clear();
-                return Some(lower);
+                // Проверяем таймаут (100мс) - как в standalone
+                if let Some(ts) = self.timestamp {
+                    if ts.elapsed().as_millis() < 100 {
+                        // Очищаем буфер и возвращаем значение
+                        self.clear();
+                        return Some(lower);
+                    }
+                }
             }
         }
+        // Если не подошло - очищаем буфер
         self.clear();
         None
     }
     
+    /// Очищает буфер
     fn clear(&mut self) {
         self.channel = None;
         self.lower_bits = None;
+        self.timestamp = None;
     }
 }
 
@@ -199,6 +219,7 @@ fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Edi
     let dual_curve_processor = self.dual_curve_processor.clone();
     let gui_state = self.gui_state.clone();
     let preset_manager = self.preset_manager.clone();
+    let settings_manager = self.settings_manager.clone();
     
     create_egui_editor(
         EguiState::from_size(1000, 650),
@@ -533,23 +554,28 @@ fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Edi
                         ui.group(|ui| {
                             ui.label("⚙️ MIDI Settings");
                             
-                            // Получаем текущее состояние без удержания блокировки
-                            let mut hi_res_enabled = {
-                                let curve = dual_curve_processor.lock().unwrap();
-                                curve.is_hi_res_enabled()
-                            };
+                            // Получаем текущее состояние
+                            let mut hi_res_enabled = dual_curve_processor.lock().unwrap().is_hi_res_enabled();
                             
-                            // changed() срабатывает когда значение изменяется
-                            if ui.checkbox(&mut hi_res_enabled, "Enable Hi-Res MIDI (14-bit)").changed() {
-                                let mut curve = dual_curve_processor.lock().unwrap();
-                                curve.set_hi_res_enabled(hi_res_enabled);
+                            // Checkbox - используем changed() для отслеживания любых изменений
+                            let response = ui.checkbox(&mut hi_res_enabled, "Enable Hi-Res MIDI (14-bit)");
+                            
+                            // Если checkbox изменился (clicked или programmatically)
+                            if response.changed() {
+                                // Обновляем состояние в dual_curve
+                                dual_curve_processor.lock().unwrap().set_hi_res_enabled(hi_res_enabled);
+                                
+                                // Сохраняем в настройки
+                                let mut settings_mgr = settings_manager.clone();
+                                settings_mgr.set_hi_res_enabled(hi_res_enabled);
+                                let _ = settings_mgr.save();
+                                
+                                // Отладочный вывод для проверки
+                                eprintln!("VST3: Hi-Res режим переключен на: {}", hi_res_enabled);
                             }
                             
-                            // Используем актуальное значение из curve для отображения
-                            let current_hi_res = {
-                                let curve = dual_curve_processor.lock().unwrap();
-                                curve.is_hi_res_enabled()
-                            };
+                            // Показываем актуальное состояние
+                            let current_hi_res = dual_curve_processor.lock().unwrap().is_hi_res_enabled();
                             
                             if current_hi_res {
                                 ui.colored_label(egui::Color32::from_rgb(100, 200, 100), "✓ Hi-Res: 14-bit (0-16383)");
@@ -654,22 +680,29 @@ fn process(
                     value,
                     ..
                 } => {
-                    // Проверяем CC#88 для hi-res режима
+                    // Проверяем CC#88 для hi-res режима (как в standalone)
                     if cc == 88 {
+                        // Читаем состояние hi-res из dual_curve
                         let hi_res_enabled = {
                             let curve = self.dual_curve_processor.lock().unwrap();
                             curve.is_hi_res_enabled()
                         }; // Сразу освобождаем блокировку
                         
                         if hi_res_enabled {
-                            // Hi-res включен - сохраняем CC#88 в буфер
+                            // Hi-res включен - сохраняем CC#88 в буфер (младшие биты)
                             let ll = (value * 127.0) as u8;
                             self.hi_res_buffer.lock().unwrap().store_cc88(channel, ll);
+                            
+                            // Отладка
+                            eprintln!("VST3: Получен CC#88={} на канале {}, буферизован", ll, channel);
+                        } else {
+                            eprintln!("VST3: Получен CC#88, но Hi-Res ВЫКЛЮЧЕН - игнорируем");
                         }
-                        // В обоих случаях не отправляем CC#88 дальше
+                        // ВАЖНО: В обоих случаях (hi-res включен или нет)
+                        // НЕ отправляем входящий CC#88 дальше (как в standalone)
                         continue;
                     }
-                    // Остальные CC пропускаем без изменений
+                    // Остальные CC сообщения пропускаем без изменений
                     context.send_event(event);
                 }
                 
@@ -692,6 +725,11 @@ fn process(
                             let hh = (velocity * 127.0) as u8;
                             let velocity_14bit = crate::curve::DualCurve::combine_14bit(ll, hh);
                             let processed = curve.process_note_on_velocity_14bit(velocity_14bit);
+                            
+                            // Отладочный вывод
+                            eprintln!("VST3 NoteOn: Hi-Res ON, LL={}, HH={}, 14bit_in={}, 14bit_out={}",
+                                ll, hh, velocity_14bit, processed);
+                            
                             (true, processed)
                         } else {
                             let processed = curve.process_note_on_velocity((velocity * 127.0) as u8) as u16;
@@ -701,6 +739,9 @@ fn process(
                     
                     if hi_res_enabled {
                         let (new_ll, new_hh) = crate::curve::DualCurve::split_14bit(processed_velocity_or_14bit);
+                        
+                        // Отладка: проверяем что отправляем
+                        eprintln!("VST3: Отправляем CC#88={}, NoteOn velocity={}", new_ll, new_hh);
                         
                         context.send_event(NoteEvent::MidiCC {
                             timing,
