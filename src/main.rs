@@ -171,9 +171,13 @@ fn new() -> Result<Self, Box<dyn std::error::Error>> {
     }
     
     /// Восстанавливает последний пресет из настроек
+    /// ВАЖНО: Только устанавливает имя пресета, но НЕ загружает его точки,
+    /// чтобы сохранить фактическое состояние кривой из настроек
     fn restore_last_preset_from_settings(&mut self) {
         if let Some(preset_name) = self.settings_manager.get_last_preset().cloned() {
-            self.load_preset(&preset_name);
+            // Только устанавливаем selected_preset без загрузки пресета
+            // Это позволяет восстановить фактическое состояние кривых из настроек,
+            // а не из пресета (пользователь мог вносить изменения после загрузки пресета)
             self.selected_preset = Some(preset_name);
         }
     }
@@ -517,7 +521,8 @@ fn reset_curve(&mut self) {
     self.selected_preset = None;
     self.selected_point = None;
     
-    // Настройки сохранятся при закрытии приложения
+    // Автоматически сохраняем настройки
+    self.auto_save_settings();
 }
     
 // Добавление контрольной точки к активной кривой
@@ -533,7 +538,11 @@ fn add_control_point(&mut self, position: Pos2, rect: Rect) {
         }
     } // освобождаем замок здесь
     
-    // Настройки сохранятся при закрытии приложения
+    // Сбрасываем selected_preset т.к. кривая изменена вручную
+    self.selected_preset = None;
+    
+    // Автоматически сохраняем настройки
+    self.auto_save_settings();
 }
     
 // Удаление выбранной точки из активной кривой
@@ -550,7 +559,10 @@ fn remove_selected_point(&mut self) -> bool {
         
         if removed {
             self.selected_point = None;
-            // Настройки сохранятся при закрытии приложения
+            // Сбрасываем selected_preset т.к. кривая изменена вручную
+            self.selected_preset = None;
+            // Автоматически сохраняем настройки
+            self.auto_save_settings();
         }
         removed
     } else {
@@ -642,6 +654,12 @@ fn find_point_at(&self, screen_pos: Pos2, rect: Rect) -> Option<usize> {
 
 impl eframe::App for MidiCurvesApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Проверяем, запрошено ли закрытие окна
+        if ctx.input(|i| i.viewport().close_requested()) {
+            // Сохраняем настройки перед выходом
+            self.on_exit();
+        }
+        
         // Обработка нажатий клавиш
         self.shift_pressed = ctx.input(|i| i.modifiers.shift);
         
@@ -1203,8 +1221,11 @@ fn draw_presets_panel(&mut self, ui: &mut egui::Ui) {
         
         // Сохранение настроек при отпускании кнопки мыши (drag release)
         if response.drag_stopped() && self.is_dragging {
-            // Мышь отпущена - сохраняем настройки
+            // Мышь отпущена - точка была перемещена
             self.is_dragging = false;
+            // Сбрасываем selected_preset т.к. кривая изменена вручную
+            self.selected_preset = None;
+            // Сохраняем настройки
             self.auto_save_settings();
         }
         
