@@ -202,6 +202,9 @@ fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Edi
         (),
         |_, _| {},
         move |egui_ctx, _setter, _state| {
+            // Устанавливаем курсор по умолчанию сразу при каждой отрисовке
+            egui_ctx.set_cursor_icon(egui::CursorIcon::Default);
+            
             egui::CentralPanel::default().show(egui_ctx, |ui| {
                 // Создаем canvas для отрисовки
                 let available_size = ui.available_size();
@@ -227,6 +230,90 @@ fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Edi
                 
                 // Фон графика
                 painter.rect_filled(graph_rect, 0.0, egui::Color32::from_rgb(25, 25, 35));
+                
+                // ОБРАБОТКА ВЗАИМОДЕЙСТВИЯ С МЫШЬЮ
+                {
+                    let mut gui_state_mut = gui_state.lock().unwrap();
+                    
+                    // При входе курсора в область - сбрасываем курсор к виду по умолчанию
+                    if response.hovered() {
+                        // Сначала всегда устанавливаем курсор по умолчанию
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::Default);
+                    }
+                    
+                    // Поиск точки под курсором для установки курсора
+                    let mut hover_point: Option<usize> = None;
+                    if let Some(hover_pos) = response.hover_pos() {
+                        const CLICK_RADIUS: f32 = 12.0;
+                        let curve = dual_curve_processor.lock().unwrap();
+                        
+                        for (i, point) in curve.note_on_curve.control_points.iter().enumerate() {
+                            let screen_x = graph_rect.left() + (point.position.0 / 127.0) * graph_rect.width();
+                            let screen_y = graph_rect.bottom() - (point.position.1 / 127.0) * graph_rect.height();
+                            let screen_pos = egui::pos2(screen_x, screen_y);
+                            
+                            if hover_pos.distance(screen_pos) < CLICK_RADIUS {
+                                hover_point = Some(i);
+                                break;
+                            }
+                        }
+                    }
+                    
+                    // Затем, если нужно, переопределяем курсор в зависимости от контекста
+                    if response.hovered() {
+                        if response.dragged() && gui_state_mut.selected_point.is_some() {
+                            ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+                        } else if hover_point.is_some() {
+                            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                        }
+                    }
+                    
+                    // Клик левой кнопкой для выбора точки
+                    if response.clicked() {
+                        gui_state_mut.selected_point = hover_point;
+                    }
+                    
+                    // Правая кнопка мыши для удаления точки
+                    if response.secondary_clicked() {
+                        if let Some(point_index) = hover_point {
+                            let mut curve = dual_curve_processor.lock().unwrap();
+                            // Удаляем только если точек больше 2 (минимум для кривой)
+                            if curve.note_on_curve.control_points.len() > 2 {
+                                curve.remove_note_on_point(point_index);
+                                // Сбрасываем выделение если удалили выбранную точку
+                                if gui_state_mut.selected_point == Some(point_index) {
+                                    gui_state_mut.selected_point = None;
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Перетаскивание точки
+                    if response.dragged() {
+                        if let Some(selected_index) = gui_state_mut.selected_point {
+                            if let Some(hover_pos) = response.hover_pos() {
+                                // Конвертируем экранные координаты в мировые
+                                let world_x = ((hover_pos.x - graph_rect.left()) / graph_rect.width() * 127.0).clamp(0.0, 127.0);
+                                let world_y = ((graph_rect.bottom() - hover_pos.y) / graph_rect.height() * 127.0).clamp(0.0, 127.0);
+                                
+                                // Обновляем позицию точки
+                                let mut curve = dual_curve_processor.lock().unwrap();
+                                curve.update_note_on_point(selected_index, (world_x, world_y));
+                            }
+                        }
+                    }
+                    
+                    // Двойной клик для добавления точки
+                    if response.double_clicked() {
+                        if let Some(hover_pos) = response.hover_pos() {
+                            let world_x = ((hover_pos.x - graph_rect.left()) / graph_rect.width() * 127.0).clamp(0.0, 127.0);
+                            let world_y = ((graph_rect.bottom() - hover_pos.y) / graph_rect.height() * 127.0).clamp(0.0, 127.0);
+                            
+                            let mut curve = dual_curve_processor.lock().unwrap();
+                            curve.add_note_on_point((world_x, world_y));
+                        }
+                    }
+                }
                 
                 // Отрисовка сетки
                 let grid_color = egui::Color32::from_gray(40);
