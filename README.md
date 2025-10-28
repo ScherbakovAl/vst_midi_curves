@@ -149,7 +149,11 @@ sudo apt install libgtk-4-dev libssl-dev libasound2-dev libudev-dev
 - **ARCHITECTURE.md** - Project architecture
 - **Cargo.toml** - Configuration and dependencies
 
-## 🎯 Result
+## 🎥 Video Demo
+
+- **YouTube**: [VST3 MIDI Curves Plugin Demo](https://www.youtube.com/watch?v=CtjtueLHJKM)
+
+## � Result
 
 You got:
 - ✅ **Working standalone application** with full GUI
