@@ -124,3 +124,4 @@ echo "- Для Reaper: поместить в папку VST3, указанную
 rm -rf /home/sche/.vst3/MidiCurves.vst3
 cp -rf /home/sche/programming/vst_midi_curves/build/midi_curves_v0.1.0/MidiCurves.vst3 /home/sche/.vst3/
 flatpak run fm.reaper.Reaper
+р

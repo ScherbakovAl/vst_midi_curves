@@ -7,7 +7,7 @@ use std::num::NonZeroU32;
 use std::sync::{Arc, Mutex};
 
 use nih_plug::prelude::*;
-use nih_plug_egui::{EguiState, egui};
+use nih_plug_egui::{create_egui_editor, EguiState, egui};
 
 use crate::curve::DualCurve;
 use crate::midi_simple::SimpleMidiManager;
@@ -97,11 +97,20 @@ struct GuiController {
 }
 
 // Состояние GUI для VST3 редактора
-#[derive(Default)]
 struct GuiState {
     selected_point: Option<usize>,
     is_dragging: bool,
     last_mouse_pos: Option<egui::Pos2>,
+}
+
+impl Default for GuiState {
+    fn default() -> Self {
+        Self {
+            selected_point: None,
+            is_dragging: false,
+            last_mouse_pos: None,
+        }
+    }
 }
 
 impl Default for MidiCurvesPlugin {
@@ -184,34 +193,110 @@ impl Plugin for MidiCurvesPlugin {
     }
 
 fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
-    // ВРЕМЕННО ОТКЛЮЧЕНО: GUI вызывает панику при загрузке в DAW
-    // Проблема: egui пытается обратиться к шрифтам до Context::run()
-    // TODO: Найти способ безопасной инициализации egui в VST3
-    None
+    // Клонируем Arc для использования в замыкании
+    let dual_curve_processor = self.dual_curve_processor.clone();
+    let gui_state = self.gui_state.clone();
     
-    /*
-    let egui_state = EguiState::from_size(1200, 800);
-    let controller = GuiController {
-        dual_curve_processor: self.dual_curve_processor.clone(),
-        midi_manager: self.midi_manager.clone(),
-        preset_manager: self.preset_manager.clone(),
-        gui_state: self.gui_state.clone(),
-        settings_manager: self.settings_manager.clone(),
-    };
-    
-    nih_plug_egui::create_egui_editor(
-        egui_state,
-        controller,
-        |egui_ctx, controller| {
+    create_egui_editor(
+        EguiState::from_size(800, 600),
+        (),
+        |_, _| {},
+        move |egui_ctx, _setter, _state| {
             egui::CentralPanel::default().show(egui_ctx, |ui| {
-                controller.draw_plugin_ui(ui);
+                // Создаем canvas для отрисовки
+                let available_size = ui.available_size();
+                let (response, painter) = ui.allocate_painter(
+                    available_size,
+                    egui::Sense::click_and_drag(),
+                );
+                
+                let rect = response.rect;
+                
+                // Рисуем фон
+                painter.rect_filled(rect, 0.0, egui::Color32::from_rgb(40, 40, 50));
+                
+                // Вычисляем область для графика
+                let margin = 20.0;
+                let graph_rect = egui::Rect::from_min_size(
+                    egui::pos2(rect.left() + margin, rect.top() + margin),
+                    egui::vec2(
+                        rect.width() - margin * 2.0,
+                        rect.height() - margin * 2.0
+                    )
+                );
+                
+                // Фон графика
+                painter.rect_filled(graph_rect, 0.0, egui::Color32::from_rgb(25, 25, 35));
+                
+                // Отрисовка сетки
+                let grid_color = egui::Color32::from_gray(40);
+                for i in 0..=10 {
+                    let x = graph_rect.left() + graph_rect.width() * i as f32 / 10.0;
+                    painter.line_segment(
+                        [egui::pos2(x, graph_rect.top()), egui::pos2(x, graph_rect.bottom())],
+                        egui::Stroke::new(1.0, grid_color),
+                    );
+                }
+                for i in 0..=10 {
+                    let y = graph_rect.top() + graph_rect.height() * i as f32 / 10.0;
+                    painter.line_segment(
+                        [egui::pos2(graph_rect.left(), y), egui::pos2(graph_rect.right(), y)],
+                        egui::Stroke::new(1.0, grid_color),
+                    );
+                }
+                
+                // Оси
+                let axis_color = egui::Color32::from_gray(100);
+                painter.line_segment(
+                    [egui::pos2(graph_rect.left(), graph_rect.bottom()), egui::pos2(graph_rect.right(), graph_rect.bottom())],
+                    egui::Stroke::new(2.0, axis_color),
+                );
+                painter.line_segment(
+                    [egui::pos2(graph_rect.left(), graph_rect.top()), egui::pos2(graph_rect.left(), graph_rect.bottom())],
+                    egui::Stroke::new(2.0, axis_color),
+                );
+                
+                // Отрисовка кривой
+                let mut curve = dual_curve_processor.lock().unwrap();
+                if curve.note_on_curve.control_points.len() >= 2 {
+                    let mut curve_points = Vec::new();
+                    for i in 0..=128 {
+                        let x_input = i as f32;
+                        let y_output = curve.note_on_curve.evaluate(x_input);
+                        
+                        let screen_x = graph_rect.left() + (x_input / 127.0) * graph_rect.width();
+                        let screen_y = graph_rect.bottom() - (y_output / 127.0) * graph_rect.height();
+                        
+                        curve_points.push(egui::pos2(screen_x, screen_y));
+                    }
+                    
+                    if curve_points.len() >= 2 {
+                        painter.add(egui::Shape::line(
+                            curve_points,
+                            egui::Stroke::new(3.0, egui::Color32::from_rgb(100, 200, 255))
+                        ));
+                    }
+                    
+                    // Контрольные точки
+                    let gui_state_lock = gui_state.lock().unwrap();
+                    for (i, point) in curve.note_on_curve.control_points.iter().enumerate() {
+                        let screen_x = graph_rect.left() + (point.position.0 / 127.0) * graph_rect.width();
+                        let screen_y = graph_rect.bottom() - (point.position.1 / 127.0) * graph_rect.height();
+                        let screen_pos = egui::pos2(screen_x, screen_y);
+                        
+                        let color = if Some(i) == gui_state_lock.selected_point {
+                            egui::Color32::from_rgb(255, 100, 100)
+                        } else {
+                            egui::Color32::from_rgb(255, 150, 150)
+                        };
+                        
+                        painter.circle_filled(screen_pos, 6.0, color);
+                        painter.circle_stroke(screen_pos, 6.0, egui::Stroke::new(1.0, egui::Color32::BLACK));
+                    }
+                }
             });
         },
-        |_ctx, _setter, _controller| {
-            // Empty update function
-        },
     )
-    */
 }
 
 fn process(
@@ -392,32 +477,52 @@ impl ClapPlugin for MidiCurvesPlugin {
 }
 
 impl GuiController {
-    /// Отрисовка GUI плагина
-    fn draw_plugin_ui(&self, ui: &mut egui::Ui) {
-        ui.set_min_size(egui::vec2(1200.0, 800.0));
+    /// Минималистичная отрисовка GUI БЕЗ ТЕКСТА (не требует шрифтов)
+    /// Только графика: кривая Безье с контрольными точками
+    fn draw_minimal_gui(&self, ui: &mut egui::Ui) {
+        // Создаем canvas для кривой во весь доступный размер
+        let available_size = ui.available_size();
+        let (response, painter) = ui.allocate_painter(
+            available_size,
+            egui::Sense::click_and_drag(),
+        );
         
-        // Заголовок
-        ui.horizontal(|ui| {
-            ui.heading("🎵 MIDI Curves VST3 Plugin");
-        });
+        let rect = response.rect;
         
-        ui.add_space(10.0);
+        // Рисуем фон canvas
+        painter.rect_filled(rect, 0.0, egui::Color32::from_rgb(40, 40, 50));
         
-        // Основной layout
-        egui::SidePanel::left("left_panel")
-            .default_width(600.0)
-            .show_inside(ui, |ui| {
-                self.draw_curve_editor(ui);
-            });
+        // Вычисляем область для графика (с отступами)
+        let margin = 20.0;
+        let graph_rect = egui::Rect::from_min_size(
+            egui::pos2(rect.left() + margin, rect.top() + margin),
+            egui::vec2(
+                rect.width() - margin * 2.0,
+                rect.height() - margin * 2.0
+            )
+        );
         
-        egui::CentralPanel::default().show_inside(ui, |ui| {
-            self.draw_control_panel(ui);
-        });
+        // Рисуем фон графика
+        painter.rect_filled(graph_rect, 0.0, egui::Color32::from_rgb(25, 25, 35));
+        
+        // Обработка взаимодействий с кривой
+        self.handle_curve_interaction(&response);
+        
+        // Отрисовка графики (БЕЗ текста - не требует шрифтов!)
+        self.draw_grid(&painter, graph_rect);
+        self.draw_bezier_curve(&painter, graph_rect);
+        
+        // Тестовая яркая точка в центре для проверки видимости
+        painter.circle_filled(
+            graph_rect.center(),
+            15.0,
+            egui::Color32::from_rgb(255, 100, 100)
+        );
     }
     
     /// Редактор кривой
     fn draw_curve_editor(&self, ui: &mut egui::Ui) {
-        ui.heading("🎯 Редактор кривой Безье");
+        ui.label("🎯 Редактор кривой Безье");
         ui.add_space(5.0);
         
         // Canvas для графика
@@ -481,7 +586,7 @@ impl GuiController {
     fn draw_control_panel(&self, ui: &mut egui::Ui) {
         // Тест кривой
         ui.group(|ui| {
-            ui.strong("🎯 Тест кривой");
+            ui.label("🎯 Тест кривой");
             
             let mut test_velocity = 64.0;
             ui.horizontal(|ui| {
@@ -529,7 +634,7 @@ impl GuiController {
         
         // Панель настроек Hi-Res MIDI
         ui.group(|ui| {
-            ui.strong("⚙️ MIDI Settings");
+            ui.label("⚙️ MIDI Settings");
             
             let mut hi_res_enabled = self.dual_curve_processor.lock().unwrap().is_hi_res_enabled();
             
@@ -557,7 +662,7 @@ impl GuiController {
         
         // Панель пресетов
         ui.group(|ui| {
-            ui.strong("📁 Пресеты");
+            ui.label("📁 Пресеты");
             
             let preset_names = self.preset_manager.lock().unwrap().get_preset_names();
             
@@ -584,7 +689,7 @@ impl GuiController {
         
         // Информация о плагине
         ui.group(|ui| {
-            ui.strong("ℹ️ Информация");
+            ui.label("ℹ️ Информация");
             ui.label(format!("Версия: {}", env!("CARGO_PKG_VERSION")));
             ui.label("Платформа: VST3 Standalone");
             
@@ -621,7 +726,7 @@ impl GuiController {
         }
         
         // Сохранение настроек при отпускании кнопки мыши (drag release)
-        if response.drag_released() && gui_state.is_dragging {
+        if response.drag_stopped() && gui_state.is_dragging {
             // Мышь отпущена - обновляем настройки в памяти (без сохранения на диск в VST3)
             gui_state.is_dragging = false;
             // Автосохранение в VST3 отключено - настройки хранятся только в памяти
