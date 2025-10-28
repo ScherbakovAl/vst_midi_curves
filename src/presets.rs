@@ -1,5 +1,5 @@
-/// Модуль для работы с пресетами кривых
-/// Обеспечивает сохранение, загрузку и управление пользовательскими пресетами
+/// Module for working with curve presets
+/// Provides saving, loading and management of user presets
 
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use crate::curve::ControlPoint;
 use crate::curve::DualCurve;
 
-/// Структура для сериализации пресета
+/// Structure for preset serialization
 #[derive(Serialize, Deserialize, Clone)]
 pub struct CurvePreset {
     pub name: String,
@@ -27,7 +27,7 @@ pub struct SerializableControlPoint {
     pub handle_out_y: f32,
 }
 
-/// Структура для сериализации пресета DualCurve (две кривые одновременно)
+/// Structure for DualCurve preset serialization (two curves simultaneously)
 #[derive(Serialize, Deserialize, Clone)]
 pub struct DualCurvePreset {
     pub name: String,
@@ -37,7 +37,7 @@ pub struct DualCurvePreset {
 }
 
 impl DualCurvePreset {
-    /// Создает новый пресет DualCurve из двух наборов контрольных точек
+    /// Creates new DualCurve preset from two sets of control points
     pub fn new(
         name: String,
         description: String,
@@ -74,7 +74,7 @@ impl DualCurvePreset {
         }
     }
     
-    /// Преобразует пресет DualCurve в DualCurve структуру
+    /// Converts DualCurve preset to DualCurve structure
     pub fn to_dual_curve(&self) -> DualCurve {
         let note_on_points = self.note_on_curve.iter()
             .map(|point| ControlPoint {
@@ -95,9 +95,9 @@ impl DualCurvePreset {
         DualCurve::from_points(note_on_points, note_off_points)
     }
     
-    /// Сохраняет пресет DualCurve в файл
+    /// Saves DualCurve preset to file
     pub fn save_to_file(&self, path: &Path) -> Result<(), Box<dyn std::error::Error>> {
-        // Создаем директорию если она не существует
+        // Create directory if it doesn't exist
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
@@ -107,21 +107,21 @@ impl DualCurvePreset {
         Ok(())
     }
     
-    /// Загружает пресет DualCurve из файла
+    /// Loads DualCurve preset from file
     pub fn load_from_file(path: &Path) -> Result<Self, Box<dyn std::error::Error>> {
         let json = fs::read_to_string(path)?;
         let preset = serde_json::from_str(&json)?;
         Ok(preset)
     }
     
-    /// Возвращает путь к файлу пресета DualCurve
+    /// Returns path to DualCurve preset file
     pub fn get_preset_file_path(&self) -> Result<PathBuf, Box<dyn std::error::Error>> {
         let mut path = CurvePreset::get_presets_directory()?;
         path.push(format!("dual_{}.json", self.sanitize_filename()));
         Ok(path)
     }
     
-    /// Очищает имя файла от недопустимых символов
+    /// Cleans filename from invalid characters
     fn sanitize_filename(&self) -> String {
         self.name
             .chars()
@@ -133,7 +133,7 @@ impl DualCurvePreset {
     }
 }
 impl CurvePreset {
-    /// Создает новый пресет из имени и контрольных точек
+    /// Creates new preset from name and control points
     pub fn new(name: String, description: String, control_points: Vec<ControlPoint>) -> Self {
         let serializable_points = control_points.into_iter()
             .map(|point| SerializableControlPoint {
@@ -153,7 +153,7 @@ impl CurvePreset {
         }
     }
     
-    /// Преобразует пресет обратно в контрольные точки
+    /// Converts preset back to control points
     pub fn to_control_points(&self) -> Vec<ControlPoint> {
         self.control_points.iter()
             .map(|point| ControlPoint {
@@ -164,9 +164,9 @@ impl CurvePreset {
             .collect()
     }
     
-    /// Сохраняет пресет в файл
+    /// Saves preset to file
     pub fn save_to_file(&self, path: &Path) -> Result<(), Box<dyn std::error::Error>> {
-        // Создаем директорию если она не существует
+        // Create directory if it doesn't exist
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
@@ -176,17 +176,17 @@ impl CurvePreset {
         Ok(())
     }
     
-    /// Загружает пресет из файла
+    /// Loads preset from file
     pub fn load_from_file(path: &Path) -> Result<Self, Box<dyn std::error::Error>> {
         let json = fs::read_to_string(path)?;
         let preset = serde_json::from_str(&json)?;
         Ok(preset)
     }
     
-    /// Возвращает путь к директории пресетов
+    /// Returns path to presets directory
     pub fn get_presets_directory() -> Result<PathBuf, Box<dyn std::error::Error>> {
         let mut presets_dir = dirs::config_dir()
-            .ok_or("Не удалось найти директорию конфигурации")?;
+            .ok_or("Failed to find configuration directory")?;
         
         presets_dir.push("vst_midi_curves");
         presets_dir.push("presets");
@@ -194,14 +194,14 @@ impl CurvePreset {
         Ok(presets_dir)
     }
     
-    /// Возвращает путь к файлу пресета
+    /// Returns path to preset file
     pub fn get_preset_file_path(&self) -> Result<PathBuf, Box<dyn std::error::Error>> {
         let mut path = Self::get_presets_directory()?;
         path.push(format!("{}.json", self.sanitize_filename()));
         Ok(path)
     }
     
-    /// Очищает имя файла от недопустимых символов
+    /// Cleans filename from invalid characters
     fn sanitize_filename(&self) -> String {
         self.name
             .chars()
@@ -213,7 +213,7 @@ impl CurvePreset {
     }
 }
 
-/// Менеджер пресетов с поддержкой обычных и DualCurve пресетов
+/// Preset manager with support for regular and DualCurve presets
 pub struct PresetManager {
     presets: HashMap<String, CurvePreset>,
     dual_curve_presets: HashMap<String, DualCurvePreset>,
@@ -221,11 +221,11 @@ pub struct PresetManager {
 }
 
 impl PresetManager {
-    /// Создает новый менеджер пресетов
+    /// Creates new preset manager
     pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
         let presets_dir = CurvePreset::get_presets_directory()?;
         
-        // Создаем директорию если её нет
+        // Create directory if it doesn't exist
         fs::create_dir_all(&presets_dir)?;
         
         let mut manager = Self {
@@ -234,13 +234,13 @@ impl PresetManager {
             presets_dir,
         };
         
-        // Загружаем существующие пресеты
+        // Load existing presets
         manager.load_all_presets()?;
         
         Ok(manager)
     }
     
-    /// Создает пустой менеджер пресетов (для VST3 при ошибке инициализации)
+    /// Creates empty preset manager (for VST3 on initialization error)
     pub fn new_empty() -> Self {
         Self {
             presets: HashMap::new(),
@@ -249,23 +249,23 @@ impl PresetManager {
         }
     }
     
-    /// Добавляет пресет
+    /// Adds preset
     pub fn add_preset(&mut self, preset: CurvePreset) -> Result<(), Box<dyn std::error::Error>> {
         let name = preset.name.clone();
         self.presets.insert(name.clone(), preset.clone());
         
-        // Автоматически сохраняем пресет
+        // Automatically save preset
         preset.save_to_file(&preset.get_preset_file_path()?)?;
         
         Ok(())
     }
     
-    /// Получает пресет по имени
+    /// Gets preset by name
     pub fn get_preset(&self, name: &str) -> Option<&CurvePreset> {
         self.presets.get(name)
     }
     
-    /// Удаляет пресет
+    /// Removes preset
     pub fn remove_preset(&mut self, name: &str) -> Result<(), Box<dyn std::error::Error>> {
         if let Some(preset) = self.presets.get(name) {
             let file_path = preset.get_preset_file_path()?;
@@ -278,12 +278,12 @@ impl PresetManager {
         Ok(())
     }
     
-    /// Возвращает все имена пресетов
+    /// Returns all preset names
     pub fn get_preset_names(&self) -> Vec<String> {
         self.presets.keys().cloned().collect()
     }
     
-    /// Сохраняет все пресеты в файлы
+    /// Saves all presets to files
     pub fn save_all_presets(&self) -> Result<(), Box<dyn std::error::Error>> {
         for preset in self.presets.values() {
             preset.save_to_file(&preset.get_preset_file_path()?)?;
@@ -291,7 +291,7 @@ impl PresetManager {
         Ok(())
     }
     
-    /// Загружает все пресеты из файлов
+    /// Loads all presets from files
     fn load_all_presets(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         if !self.presets_dir.exists() {
             return Ok(());
@@ -312,15 +312,15 @@ impl PresetManager {
         Ok(())
     }
     
-    /// Создает встроенные пресеты в памяти (без сохранения на диск)
-    /// Безопасно для VST3 плагинов, работающих в песочнице
+    /// Creates builtin presets in memory (without saving to disk)
+    /// Safe for VST3 plugins running in sandbox
     pub fn create_builtin_presets_in_memory(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let builtin_presets = self.get_builtin_presets_data();
         
         for (name, description, control_points) in builtin_presets {
             if !self.presets.contains_key(&name) {
                 let preset = CurvePreset::new(name.clone(), description, control_points);
-                // Добавляем только в память, НЕ сохраняем на диск
+                // Add only to memory, DO NOT save to disk
                 self.presets.insert(name, preset);
             }
         }
@@ -328,13 +328,13 @@ impl PresetManager {
         Ok(())
     }
     
-    /// Создает встроенные пресеты если их нет (с сохранением на диск)
-    /// Используется только в standalone приложении
+    /// Creates builtin presets if they don't exist (with disk saving)
+    /// Used only in standalone application
     pub fn create_builtin_presets(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let builtin_presets = vec![
             (
                 "Linear".to_string(),
-                "Линейная кривая (y = x)".to_string(),
+                "Linear curve (y = x)".to_string(),
                 vec![
                     ControlPoint::new((0.0, 0.0)),
                     ControlPoint::new((127.0, 127.0)),
@@ -342,7 +342,7 @@ impl PresetManager {
             ),
             (
                 "Soft S-Curve".to_string(),
-                "Мягкая S-образная кривая".to_string(),
+                "Soft S-curve".to_string(),
                 vec![
                     ControlPoint::new((0.0, 0.0)),
                     ControlPoint::new((42.0, 32.0)),
@@ -352,7 +352,7 @@ impl PresetManager {
             ),
             (
                 "Exponential".to_string(),
-                "Экспоненциальная кривая".to_string(),
+                "Exponential curve".to_string(),
                 vec![
                     ControlPoint::new((0.0, 0.0)),
                     ControlPoint::new((25.0, 12.0)),
@@ -362,7 +362,7 @@ impl PresetManager {
             ),
             (
                 "Inverse Exponential".to_string(),
-                "Обратная экспоненциальная кривая".to_string(),
+                "Inverse exponential curve".to_string(),
                 vec![
                     ControlPoint::new((0.0, 0.0)),
                     ControlPoint::new((64.0, 89.0)),
@@ -372,7 +372,7 @@ impl PresetManager {
             ),
             (
                 "Sigmoid".to_string(),
-                "Сигмоидная кривая".to_string(),
+                "Sigmoid curve".to_string(),
                 vec![
                     ControlPoint::new((0.0, 0.0)),
                     ControlPoint::new((32.0, 16.0)),
@@ -382,7 +382,7 @@ impl PresetManager {
             ),
             (
                 "Hard Step".to_string(),
-                "Жесткая ступенька".to_string(),
+                "Hard step".to_string(),
                 vec![
                     ControlPoint::new((0.0, 0.0)),
                     ControlPoint::new((64.0, 0.0)),
@@ -392,7 +392,7 @@ impl PresetManager {
             ),
             (
                 "Gentle Curve".to_string(),
-                "Плавная кривая".to_string(),
+                "Gentle curve".to_string(),
                 vec![
                     ControlPoint::new((0.0, 0.0)),
                     ControlPoint::new((32.0, 20.0)),
@@ -402,7 +402,7 @@ impl PresetManager {
             ),
             (
                 "Aggressive Curve".to_string(),
-                "Агрессивная кривая".to_string(),
+                "Aggressive curve".to_string(),
                 vec![
                     ControlPoint::new((0.0, 0.0)),
                     ControlPoint::new((48.0, 8.0)),
@@ -424,12 +424,12 @@ impl PresetManager {
         Ok(())
     }
     
-    /// Возвращает данные встроенных пресетов
+    /// Returns builtin presets data
     fn get_builtin_presets_data(&self) -> Vec<(String, String, Vec<ControlPoint>)> {
         vec![
             (
                 "Linear".to_string(),
-                "Линейная кривая (y = x)".to_string(),
+                "Linear curve (y = x)".to_string(),
                 vec![
                     ControlPoint::new((0.0, 0.0)),
                     ControlPoint::new((127.0, 127.0)),
@@ -437,7 +437,7 @@ impl PresetManager {
             ),
             (
                 "Soft S-Curve".to_string(),
-                "Мягкая S-образная кривая".to_string(),
+                "Soft S-curve".to_string(),
                 vec![
                     ControlPoint::new((0.0, 0.0)),
                     ControlPoint::new((42.0, 32.0)),
@@ -447,7 +447,7 @@ impl PresetManager {
             ),
             (
                 "Exponential".to_string(),
-                "Экспоненциальная кривая".to_string(),
+                "Exponential curve".to_string(),
                 vec![
                     ControlPoint::new((0.0, 0.0)),
                     ControlPoint::new((25.0, 12.0)),
@@ -457,7 +457,7 @@ impl PresetManager {
             ),
             (
                 "Inverse Exponential".to_string(),
-                "Обратная экспоненциальная кривая".to_string(),
+                "Inverse exponential curve".to_string(),
                 vec![
                     ControlPoint::new((0.0, 0.0)),
                     ControlPoint::new((64.0, 89.0)),
@@ -467,7 +467,7 @@ impl PresetManager {
             ),
             (
                 "Sigmoid".to_string(),
-                "Сигмоидная кривая".to_string(),
+                "Sigmoid curve".to_string(),
                 vec![
                     ControlPoint::new((0.0, 0.0)),
                     ControlPoint::new((32.0, 16.0)),
@@ -477,7 +477,7 @@ impl PresetManager {
             ),
             (
                 "Hard Step".to_string(),
-                "Жесткая ступенька".to_string(),
+                "Hard step".to_string(),
                 vec![
                     ControlPoint::new((0.0, 0.0)),
                     ControlPoint::new((64.0, 0.0)),
@@ -487,7 +487,7 @@ impl PresetManager {
             ),
             (
                 "Gentle Curve".to_string(),
-                "Плавная кривая".to_string(),
+                "Gentle curve".to_string(),
                 vec![
                     ControlPoint::new((0.0, 0.0)),
                     ControlPoint::new((32.0, 20.0)),
@@ -497,7 +497,7 @@ impl PresetManager {
             ),
             (
                 "Aggressive Curve".to_string(),
-                "Агрессивная кривая".to_string(),
+                "Aggressive curve".to_string(),
                 vec![
                     ControlPoint::new((0.0, 0.0)),
                     ControlPoint::new((48.0, 8.0)),

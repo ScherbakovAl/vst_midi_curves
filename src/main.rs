@@ -1,13 +1,13 @@
-//! MIDI Curves - Standalone приложение для обработки MIDI velocity с настраиваемыми кривыми
+//! MIDI Curves - Standalone application for processing MIDI velocity with customizable curves
 //!
-//! Теперь поддерживает отдельные кривые для NoteOn и NoteOff событий.
-//! Использует DualCurve структуру для управления двумя кривыми одновременно.
-//! Включает систему сохранения и загрузки настроек для каждой платформы.
+//! Now supports separate curves for NoteOn and NoteOff events.
+//! Uses DualCurve structure to manage two curves simultaneously.
+//! Includes settings save and load system for each platform.
 
 use eframe::egui;
 use std::sync::{Arc, Mutex};
 
-// Подключаем модули проекта
+// Connect project modules
 mod curve;
 mod presets;
 mod midi;
@@ -20,7 +20,7 @@ use midi::{MidiManager, MidiEvent, MidiStats};
 use settings::SettingsManager;
 use egui::{Pos2, Rect, Sense, Response, Painter, Color32, Stroke};
 
-// MIDI события для отображения в GUI
+// MIDI events for GUI display
 #[derive(Debug, Clone)]
 struct GuiMidiEvent {
     event: MidiEvent,
@@ -28,12 +28,12 @@ struct GuiMidiEvent {
     is_processed: bool,
 }
 
-// Главная структура приложения
+// Main application structure
 struct MidiCurvesApp {
-    // Ядро обработки кривых - теперь использует DualCurve для NoteOn и NoteOff
+    // Curve processing core - now uses DualCurve for NoteOn and NoteOff
     dual_curve: Arc<Mutex<DualCurve>>,
     
-    // MIDI менеджер для реальной обработки
+    // MIDI manager for real processing
     midi_manager: Arc<Mutex<MidiManager>>,
     
     midi_input_ports: Vec<String>,
@@ -42,23 +42,23 @@ struct MidiCurvesApp {
     selected_output_port: Option<String>,
     midi_stats: MidiStats,
     
-    // Состояние интерфейса
+    // Interface state
     selected_point: Option<usize>,
     is_dragging: bool,
     drag_start: Option<Pos2>,
     shift_pressed: bool,
     
-    // Активная вкладка: true для NoteOn, false для NoteOff
+    // Active tab: true for NoteOn, false for NoteOff
     active_tab_note_on: bool,
     
-    // Менеджер пресетов
+    // Preset manager
     preset_manager: Arc<Mutex<PresetManager>>,
     selected_preset: Option<String>,
     
-    // Менеджер настроек приложения
+    // Application settings manager
     settings_manager: SettingsManager,
     
-    // Состояние диалога сохранения пресета
+    // Save preset dialog state
     show_save_preset_dialog: bool,
     save_preset_name: String,
     save_preset_description: String,
@@ -66,22 +66,22 @@ struct MidiCurvesApp {
 
 impl MidiCurvesApp {
 fn new() -> Result<Self, Box<dyn std::error::Error>> {
-        // Создаем менеджер настроек (загружает сохраненные настройки если есть)
+        // Create settings manager (loads saved settings if available)
         let settings_manager = SettingsManager::new()?;
         
-        // Создаем менеджер пресетов
+        // Create preset manager
         let preset_manager = Arc::new(Mutex::new(PresetManager::new()?));
         
-        // Создаем встроенные пресеты если их нет
+        // Create built-in presets if none exist
         {
             let mut manager = preset_manager.lock().unwrap();
             manager.create_builtin_presets()?;
         }
         
-        // Восстанавливаем DualCurve из настроек или создаем новый
+        // Restore DualCurve from settings or create new one
         let dual_curve_processor = Arc::new(Mutex::new(settings_manager.restore_to_dual_curve()));
         
-        // Инициализируем приложение
+// Initialize application
         let mut app = Self {
             dual_curve: dual_curve_processor.clone(),
             midi_manager: Arc::new(Mutex::new(MidiManager::new(dual_curve_processor.clone()))),
@@ -95,7 +95,7 @@ fn new() -> Result<Self, Box<dyn std::error::Error>> {
             is_dragging: false,
             drag_start: None,
             shift_pressed: false,
-            active_tab_note_on: settings_manager.get_active_curve_tab() == 0, // Восстанавливаем из настроек
+            active_tab_note_on: settings_manager.get_active_curve_tab() == 0, // Restore from settings
             preset_manager,
             selected_preset: None,
             settings_manager,
@@ -104,134 +104,134 @@ fn new() -> Result<Self, Box<dyn std::error::Error>> {
             save_preset_description: String::new(),
         };
         
-        // Запускаем полный MIDI менеджер
+        // Start full MIDI manager
         {
             let mut midi_manager_mut = app.midi_manager.lock().unwrap();
             midi_manager_mut.start()?;
         }
         
-        // Восстанавливаем последние выбранные MIDI порты
+        // Restore last selected MIDI ports
         app.restore_midi_ports_from_settings();
         
-        // Восстанавливаем последний пресет если есть
+        // Restore last preset if available
         app.restore_last_preset_from_settings();
         
-        // Обновляем список MIDI портов при запуске
+        // Update MIDI ports list at startup
         app.refresh_midi_ports();
         
         Ok(app)
     }
     
-    /// Восстанавливает MIDI порты из сохраненных настроек с проверкой доступности
+    /// Restores MIDI ports from saved settings with availability check
     fn restore_midi_ports_from_settings(&mut self) {
-        // Сначала обновляем список доступных портов
+        // First update the list of available ports
         self.refresh_midi_ports();
         
-        // Сохраняем значения из настроек в переменные, чтобы избежать заимствования
+        // Save values from settings to variables to avoid borrowing conflicts
         let saved_input_port = self.settings_manager.get_last_input_port().map(|s| s.clone());
         let saved_output_port = self.settings_manager.get_last_output_port().map(|s| s.clone());
         
-        // Восстанавливаем входной порт
+        // Restore input port
         if let Some(input_port_name) = saved_input_port {
-            // Проверяем, существует ли сохраненный порт в текущем списке доступных
+            // Check if the saved port exists in the current list of available ports
             if self.midi_input_ports.iter().any(|port| port == &input_port_name) {
                 self.selected_input_port = Some(input_port_name.clone());
                 
-                // Пытаемся подключиться к порту
+                // Try to connect to the port
                 if let Err(e) = self.connect_input_port(&input_port_name) {
-                    eprintln!("Ошибка восстановления входного порта '{}': {}", input_port_name, e);
-                    self.selected_input_port = None; // Сбрасываем при ошибке
+                    eprintln!("Input port restoration error '{}': {}", input_port_name, e);
+                    self.selected_input_port = None; // Reset on error
                 }
             } else {
-                // Сохраненный порт не найден - сбрасываем настройку
-                eprintln!("Сохраненный входной порт '{}' недоступен", input_port_name);
+                // Saved port not found - reset setting
+                eprintln!("Saved input port '{}' is not available", input_port_name);
                 self.settings_manager.update_midi_ports(None, self.selected_output_port.clone());
                 self.selected_input_port = None;
             }
         }
         
-        // Восстанавливаем выходной порт
+        // Restore output port
         if let Some(output_port_name) = saved_output_port {
-            // Проверяем, существует ли сохраненный порт в текущем списке доступных
+            // Check if the saved port exists in the current list of available ports
             if self.midi_output_ports.iter().any(|port| port == &output_port_name) {
                 self.selected_output_port = Some(output_port_name.clone());
                 
-                // Пытаемся подключиться к порту
+                // Try to connect to the port
                 if let Err(e) = self.connect_output_port(&output_port_name) {
-                    eprintln!("Ошибка восстановления выходного порта '{}': {}", output_port_name, e);
-                    self.selected_output_port = None; // Сбрасываем при ошибке
+                    eprintln!("Output port restoration error '{}': {}", output_port_name, e);
+                    self.selected_output_port = None; // Reset on error
                 }
             } else {
-                // Сохраненный порт не найден - сбрасываем настройку
-                eprintln!("Сохраненный выходной порт '{}' недоступен", output_port_name);
+                // Saved port not found - reset setting
+                eprintln!("Saved output port '{}' is not available", output_port_name);
                 self.settings_manager.update_midi_ports(self.selected_input_port.clone(), None);
                 self.selected_output_port = None;
             }
         }
     }
     
-    /// Восстанавливает последний пресет из настроек
-    /// ВАЖНО: Только устанавливает имя пресета, но НЕ загружает его точки,
-    /// чтобы сохранить фактическое состояние кривой из настроек
+    /// Restores the last preset from settings
+    /// IMPORTANT: Only sets the preset name, but does NOT load its points,
+    /// to preserve the actual curve state from settings
     fn restore_last_preset_from_settings(&mut self) {
         if let Some(preset_name) = self.settings_manager.get_last_preset().cloned() {
-            // Только устанавливаем selected_preset без загрузки пресета
-            // Это позволяет восстановить фактическое состояние кривых из настроек,
-            // а не из пресета (пользователь мог вносить изменения после загрузки пресета)
+            // Only set selected_preset without loading the preset
+            // This allows restoring the actual curve state from settings,
+            // not from the preset (user could have made changes after preset loading)
             self.selected_preset = Some(preset_name);
         }
     }
     
-    /// Сохраняет текущие настройки приложения
+    /// Saves current application settings
     fn save_settings(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        // Обновляем состояние кривых в настройках
+        // Update curve state in settings
         self.settings_manager.update_from_dual_curve(&self.dual_curve.lock().unwrap());
         
-        // Обновляем MIDI порты
+        // Update MIDI ports
         self.settings_manager.update_midi_ports(
             self.selected_input_port.clone(),
             self.selected_output_port.clone()
         );
         
-        // Обновляем последний пресет
+        // Update last preset
         self.settings_manager.update_last_preset(self.selected_preset.clone());
         
-        // Сохраняем настройки в файл
+        // Save settings to file
         self.settings_manager.save()
     }
     
-    /// Автоматически сохраняет настройки если включено автосохранение
+    /// Automatically saves settings if auto-save is enabled
     fn auto_save_settings(&mut self) {
         if self.settings_manager.is_auto_save_enabled() {
             if let Err(e) = self.save_settings() {
-                eprintln!("Ошибка автосохранения настроек: {}", e);
+                eprintln!("Auto-save settings error: {}", e);
             }
         }
     }
     
-    /// Вызывается при закрытии приложения для сохранения настроек
+    /// Called when closing application to save settings
     fn on_exit(&mut self) {
         if let Err(e) = self.save_settings() {
-            eprintln!("Ошибка при сохранении настроек: {}", e);
+            eprintln!("Error saving settings: {}", e);
         }
     }
     
 fn process_input_velocity(&self, input_velocity: u8) -> u8 {
         let mut dual_curve = self.dual_curve.lock().unwrap();
-        // По умолчанию используем NoteOn кривую для тестирования
+        // Use NoteOn curve by default for testing
         dual_curve.process_note_on_velocity(input_velocity)
     }
     
-    // Тестирование кривой
+    // Curve testing
     fn test_curve(&mut self) {
-        let input_velocity = 64; // Тестовое значение
+        let input_velocity = 64; // Test value
         let _output_velocity = self.process_input_velocity(input_velocity);
         // Velocity test completed silently
     }
     
-    // Обновление списка MIDI портов
+    // Update MIDI ports list
     fn refresh_midi_ports(&mut self) {
-        // Используем полный MIDI менеджер
+        // Use full MIDI manager
         let midi_manager = self.midi_manager.lock().unwrap();
         self.midi_input_ports = midi_manager.get_input_ports();
         self.midi_output_ports = midi_manager.get_output_ports();
@@ -240,13 +240,13 @@ fn process_input_velocity(&self, input_velocity: u8) -> u8 {
         // MIDI ports list updated silently
     }
     
-    // Подключение к входному MIDI порту
+    // Connect to input MIDI port
     fn connect_input_port(&mut self, port_name: &str) -> Result<(), Box<dyn std::error::Error>> {
         let mut midi_manager = self.midi_manager.lock().unwrap();
         midi_manager.connect_input_port(port_name)?;
         self.selected_input_port = Some(port_name.to_string());
         
-        // Автоматически сохраняем в настройки
+        // Auto-save to settings
         if self.settings_manager.is_auto_save_enabled() {
             self.settings_manager.update_midi_ports(
                 Some(port_name.to_string()),
@@ -258,13 +258,13 @@ fn process_input_velocity(&self, input_velocity: u8) -> u8 {
         Ok(())
     }
     
-    // Подключение к выходному MIDI порту
+    // Connect to output MIDI port
     fn connect_output_port(&mut self, port_name: &str) -> Result<(), Box<dyn std::error::Error>> {
         let mut midi_manager = self.midi_manager.lock().unwrap();
         midi_manager.connect_output_port(port_name)?;
         self.selected_output_port = Some(port_name.to_string());
         
-        // Автоматически сохраняем в настройки
+        // Auto-save to settings
         if self.settings_manager.is_auto_save_enabled() {
             self.settings_manager.update_midi_ports(
                 self.selected_input_port.clone(),
@@ -276,14 +276,14 @@ fn process_input_velocity(&self, input_velocity: u8) -> u8 {
         Ok(())
     }
     
-// Отключение всех MIDI портов
+// Disconnect all MIDI ports
     fn disconnect_all_ports(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let mut midi_manager = self.midi_manager.lock().unwrap();
         midi_manager.disconnect_all_ports()?;
         self.selected_input_port = None;
         self.selected_output_port = None;
         
-        // Сохраняем настройки
+        // Save settings
         if self.settings_manager.is_auto_save_enabled() {
             self.settings_manager.update_midi_ports(None, None);
             let _ = self.settings_manager.save();
@@ -292,13 +292,13 @@ fn process_input_velocity(&self, input_velocity: u8) -> u8 {
         Ok(())
     }
     
-// Отключение входного MIDI порта
+// Disconnect input MIDI port
     fn disconnect_input_port(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let mut midi_manager = self.midi_manager.lock().unwrap();
         midi_manager.disconnect_input_port()?;
         self.selected_input_port = None;
         
-        // Сохраняем настройки
+        // Save settings
         if self.settings_manager.is_auto_save_enabled() {
             self.settings_manager.update_midi_ports(None, self.selected_output_port.clone());
             let _ = self.settings_manager.save();
@@ -307,13 +307,13 @@ fn process_input_velocity(&self, input_velocity: u8) -> u8 {
         Ok(())
     }
     
-    // Отключение выходного MIDI порта
+    // Disconnect output MIDI port
     fn disconnect_output_port(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let mut midi_manager = self.midi_manager.lock().unwrap();
         midi_manager.disconnect_output_port()?;
         self.selected_output_port = None;
         
-        // Сохраняем настройки
+        // Save settings
         if self.settings_manager.is_auto_save_enabled() {
             self.settings_manager.update_midi_ports(self.selected_input_port.clone(), None);
             let _ = self.settings_manager.save();
@@ -322,22 +322,22 @@ fn process_input_velocity(&self, input_velocity: u8) -> u8 {
         Ok(())
     }
     
-    // Проверка активности MIDI
+    // Check MIDI activity
     fn is_midi_active(&self) -> bool {
         let midi_manager = self.midi_manager.lock().unwrap();
         midi_manager.is_active()
     }
     
-    // Обновление списка MIDI событий для GUI
+    // Update MIDI events list for GUI
     fn update_midi_events(&mut self) {
-        // В реальной реализации здесь события поступают через callbacks
-        // Пока оставляем пустым для совместимости с простым менеджером
+        // In real implementation events come through callbacks
+        // For now leave empty for compatibility with simple manager
     }
     
-    // Тестирование MIDI обработки
+    // Test MIDI processing
     fn test_midi_processing(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let _midi_manager = self.midi_manager.lock().unwrap();
-        // Создаем тестовое MIDI событие
+        // Create test MIDI event
         let _test_event = MidiEvent::NoteOn {
             channel: 0,
             note: 60,
@@ -350,7 +350,7 @@ fn process_input_velocity(&self, input_velocity: u8) -> u8 {
         Ok(())
     }
     
-// Отправка тестового MIDI сообщения на подключенный выходной порт
+// Send test MIDI message to connected output port
     fn send_test_midi_message(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let mut dual_curve = self.dual_curve.lock().unwrap();
         
@@ -410,9 +410,9 @@ fn process_input_velocity(&self, input_velocity: u8) -> u8 {
         Ok(())
     }
     
-// Загрузка пресета (применяется к активной вкладке)
+// Load preset (applies to active tab)
     fn load_preset(&mut self, preset_name: &str) {
-        // Сначала получаем пресет и клонируем его данные
+        // First get preset and clone its data
         let preset_data = {
             let preset_manager = self.preset_manager.lock().unwrap();
             preset_manager.get_preset(preset_name).map(|preset| preset.clone())
@@ -424,49 +424,49 @@ fn process_input_velocity(&self, input_velocity: u8) -> u8 {
                 let points = preset.to_control_points();
                 
                 if self.active_tab_note_on {
-                    // Применяем к NoteOn кривой
+                    // Apply to NoteOn curve
                     dual_curve.note_on_curve.control_points = points.clone();
                     dual_curve.note_on_curve.dirty = true;
                 } else {
-                    // Применяем к NoteOff кривой
+                    // Apply to NoteOff curve
                     dual_curve.note_off_curve.control_points = points;
                     dual_curve.note_off_curve.dirty = true;
                 }
-            } // освобождаем замок здесь
+            } // release lock here
             
             self.selected_preset = Some(preset_name.to_string());
             
-            // Автоматически сохраняем изменения
+            // Auto-save changes
             self.auto_save_settings();
         }
     }
     
-// Открывает диалог сохранения пресета
+// Open save preset dialog
     fn open_save_preset_dialog(&mut self) {
         self.show_save_preset_dialog = true;
         self.save_preset_name.clear();
         self.save_preset_description.clear();
     }
     
-    // Сохранение пресета из диалога
+    // Save preset from dialog
     fn save_preset_from_dialog(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let trimmed_name = self.save_preset_name.trim();
         
         if trimmed_name.is_empty() {
-            return Err("Имя пресета не может быть пустым".into());
+            return Err("Preset name cannot be empty".into());
         }
         
-        // Проверяем, что пресет с таким именем не существует
+        // Check that preset with this name doesn't exist
         {
             let manager = self.preset_manager.lock().unwrap();
             if manager.get_preset(trimmed_name).is_some() {
-                return Err(format!("Пресет с именем '{}' уже существует", trimmed_name).into());
+                return Err(format!("Preset with name '{}' already exists", trimmed_name).into());
             }
         }
         
         let name = trimmed_name.to_string();
         let description = if self.save_preset_description.trim().is_empty() {
-            format!("Пресет {}, создан {}",
+            format!("Preset {}, created {}",
                 if self.active_tab_note_on { "NoteOn" } else { "NoteOff" },
                 std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
@@ -477,7 +477,7 @@ fn process_input_velocity(&self, input_velocity: u8) -> u8 {
             self.save_preset_description.trim().to_string()
         };
         
-        // Получаем точки кривой заранее, чтобы избежать проблем с заимствованием
+        // Get curve points in advance to avoid borrowing issues
         let points = {
             let dual_curve = self.dual_curve.lock().unwrap();
             if self.active_tab_note_on {
@@ -493,39 +493,39 @@ fn process_input_velocity(&self, input_velocity: u8) -> u8 {
         self.selected_preset = Some(name);
         self.show_save_preset_dialog = false;
         
-        // Сохраняем настройки после выхода из блокировки
+        // Save settings after releasing lock
         let auto_save = self.settings_manager.is_auto_save_enabled();
         if auto_save {
             if let Err(e) = self.save_settings() {
-                eprintln!("Ошибка автосохранения настроек: {}", e);
+                eprintln!("Auto-save settings error: {}", e);
             }
         }
         
         Ok(())
     }
     
-    // Закрывает диалог сохранения без сохранения
+    // Close save dialog without saving
     fn close_save_preset_dialog(&mut self) {
         self.show_save_preset_dialog = false;
         self.save_preset_name.clear();
         self.save_preset_description.clear();
     }
     
-// Сброс к линейной кривой (обеих кривых)
+// Reset to linear curve (both curves)
 fn reset_curve(&mut self) {
     {
         let mut dual_curve = self.dual_curve.lock().unwrap();
         dual_curve.reset_to_linear();
-    } // освобождаем замок здесь
+    } // release lock here
     
     self.selected_preset = None;
     self.selected_point = None;
     
-    // Автоматически сохраняем настройки
+    // Auto-save settings
     self.auto_save_settings();
 }
     
-// Добавление контрольной точки к активной кривой
+// Add control point to active curve
 fn add_control_point(&mut self, position: Pos2, rect: Rect) {
     let world_pos = self.screen_to_world(position, rect);
     {
@@ -536,16 +536,16 @@ fn add_control_point(&mut self, position: Pos2, rect: Rect) {
         } else {
             dual_curve.add_note_off_point((world_pos.x, world_pos.y));
         }
-    } // освобождаем замок здесь
+    } // release lock here
     
-    // Сбрасываем selected_preset т.к. кривая изменена вручную
+    // Reset selected_preset since curve was manually modified
     self.selected_preset = None;
     
-    // Автоматически сохраняем настройки
+    // Auto-save settings
     self.auto_save_settings();
 }
     
-// Удаление выбранной точки из активной кривой
+// Remove selected point from active curve
 fn remove_selected_point(&mut self) -> bool {
     if let Some(index) = self.selected_point {
         let removed = {
@@ -555,13 +555,13 @@ fn remove_selected_point(&mut self) -> bool {
             } else {
                 dual_curve.remove_note_off_point(index)
             }
-        }; // освобождаем замок здесь
+        }; // release lock here
         
         if removed {
             self.selected_point = None;
-            // Сбрасываем selected_preset т.к. кривая изменена вручную
+            // Reset selected_preset since curve was manually modified
             self.selected_preset = None;
-            // Автоматически сохраняем настройки
+            // Auto-save settings
             self.auto_save_settings();
         }
         removed
@@ -570,7 +570,7 @@ fn remove_selected_point(&mut self) -> bool {
     }
 }
     
-// Обновление позиции точки в активной кривой
+// Update point position in active curve
 fn update_selected_point(&mut self, position: Pos2, rect: Rect) {
     if let Some(index) = self.selected_point {
         let mut world_pos = self.screen_to_world(position, rect);
@@ -583,7 +583,7 @@ fn update_selected_point(&mut self, position: Pos2, rect: Rect) {
                 &dual_curve.note_off_curve.control_points
             };
             
-            // При тонком перемещении (Shift) ограничиваем скорость перемещения
+            // With fine movement (Shift) limit movement speed
             if self.shift_pressed {
                 if let Some(current_point) = points.get(index) {
                     let current_x = current_point.position.0;
@@ -592,8 +592,8 @@ fn update_selected_point(&mut self, position: Pos2, rect: Rect) {
                     let dx = world_pos.x - current_x;
                     let dy = world_pos.y - current_y;
                     
-                    // В тонком режиме двигаемся очень медленно
-                    // Максимальный шаг 0.02 за одно обновление (сотые доли)
+                    // In fine mode move very slowly
+                    // Maximum step 0.02 per update (hundredths)
                     let max_fine_step = 0.02;
                     
                     world_pos = Pos2::new(
@@ -612,20 +612,20 @@ fn update_selected_point(&mut self, position: Pos2, rect: Rect) {
             } else {
                 dual_curve.update_note_off_point(index, (world_pos.x, world_pos.y));
             }
-        } // освобождаем замок здесь
+        } // release lock here
         
-        // Настройки будут сохранены при завершении перетаскивания (mouse release)
+        // Settings will be saved when dragging ends (mouse release)
     }
 }
     
-    // Конвертация экранных координат в мировые
+    // Convert screen coordinates to world coordinates
     fn screen_to_world(&self, screen_pos: Pos2, rect: Rect) -> Pos2 {
         let x = (screen_pos.x - rect.left()) / rect.width() * 127.0;
         let y = (rect.bottom() - screen_pos.y) / rect.height() * 127.0;
         Pos2::new(x, y)
     }
     
-    // Конвертация мировых координат в экранные
+    // Convert world coordinates to screen coordinates
     fn world_to_screen(&self, world_pos: Pos2, rect: Rect) -> Pos2 {
         let x = rect.left() + world_pos.x / 127.0 * rect.width();
         let y = rect.bottom() - world_pos.y / 127.0 * rect.height();
@@ -654,86 +654,86 @@ fn find_point_at(&self, screen_pos: Pos2, rect: Rect) -> Option<usize> {
 
 impl eframe::App for MidiCurvesApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // Проверяем, запрошено ли закрытие окна
+        // Check if window close was requested
         if ctx.input(|i| i.viewport().close_requested()) {
-            // Сохраняем настройки перед выходом
+            // Save settings before exit
             self.on_exit();
         }
         
-        // Обработка нажатий клавиш
+        // Handle key presses
         self.shift_pressed = ctx.input(|i| i.modifiers.shift);
         
-        // Отрисовка главного окна
+        // Draw main window
         egui::CentralPanel::default().show(ctx, |ui| {
             self.draw_main_ui(ui);
         });
         
-        // Диалог сохранения пресета
+        // Save preset dialog
         if self.show_save_preset_dialog {
-            egui::Window::new("💾 Сохранить пресет")
+            egui::Window::new("💾 Save Preset")
                 .resizable(false)
                 .collapsible(false)
                 .default_pos(ctx.input(|i| i.pointer.hover_pos().unwrap_or(egui::pos2(400.0, 300.0))))
                 .show(ctx, |ui| {
-                    ui.label("Введите имя нового пресета:");
+                    ui.label("Enter name for new preset:");
                     ui.add_space(5.0);
                     
-                    // Поле для имени
+                    // Name field
                     ui.vertical(|ui| {
-                        ui.label("Имя пресета:");
+                        ui.label("Preset name:");
                         ui.add(egui::TextEdit::singleline(&mut self.save_preset_name)
                             .desired_width(300.0)
-                            .hint_text("Мой пресет"));
+                            .hint_text("My Preset"));
                     });
                     
                     ui.add_space(10.0);
                     
-                    // Поле для описания (опционально)
+                    // Description field (optional)
                     ui.vertical(|ui| {
-                        ui.label("Описание (необязательно):");
+                        ui.label("Description (optional):");
     ui.add(egui::TextEdit::multiline(&mut self.save_preset_description)
                             .desired_width(300.0)
-                            .hint_text("Описание пресета..."));
+                            .hint_text("Preset description..."));
                     });
                     
                     ui.add_space(15.0);
                     
-                    // Кнопки
+                    // Buttons
                     ui.horizontal(|ui| {
-                        if ui.button("💾 Сохранить").clicked() {
+                        if ui.button("💾 Save").clicked() {
                             if let Err(e) = self.save_preset_from_dialog() {
-                                eprintln!("Ошибка сохранения пресета: {}", e);
-                                // Можно показать ошибку пользователю через отдельное поле
+                                eprintln!("Preset save error: {}", e);
+                                // Could show error to user through separate field
                             }
                         }
                         
-                        if ui.button("❌ Отмена").clicked() {
+                        if ui.button("❌ Cancel").clicked() {
                             self.close_save_preset_dialog();
                         }
                     });
                 });
         }
         
-        // Обычная перерисовка при необходимости (убираем принудительное)
+        // Normal repaint when needed (remove forced)
         // ctx.request_repaint();
     }
 }
 
 impl MidiCurvesApp {
     fn draw_main_ui(&mut self, ui: &mut egui::Ui) {
-        // Заголовок приложения
+// Application title
         ui.horizontal(|ui| {
             ui.label(egui::RichText::new("🎵 MIDI Curves Plugin - Dual Curves").size(18.0));
         });
         
         ui.add_space(10.0);
         
-        // Вкладки для выбора между NoteOn и NoteOff кривыми
+// Tabs for selecting between NoteOn and NoteOff curves
         ui.horizontal(|ui| {
             ui.label(egui::RichText::new("📊 Curve Type:").size(14.0));
             ui.add_space(5.0);
             
-            // NoteOn вкладка
+            // NoteOn tab
             let note_on_button = ui.button(if self.active_tab_note_on {
                 "🎵 NoteOn (Active)"
             } else {
@@ -741,9 +741,9 @@ impl MidiCurvesApp {
             });
             if note_on_button.clicked() {
                 self.active_tab_note_on = true;
-                self.selected_point = None; // Сбрасываем выбранную точку при переключении
+                self.selected_point = None; // Reset selected point when switching
                 
-                // Сохраняем настройку активной вкладки
+                // Save active tab setting
                 self.settings_manager.update_active_curve_tab(0);
                 if self.settings_manager.is_auto_save_enabled() {
                     let _ = self.settings_manager.save();
@@ -752,7 +752,7 @@ impl MidiCurvesApp {
             
             ui.add_space(5.0);
             
-            // NoteOff вкладка
+            // NoteOff tab
             let note_off_button = ui.button(if !self.active_tab_note_on {
                 "🔇 NoteOff (Active)"
             } else {
@@ -760,9 +760,9 @@ impl MidiCurvesApp {
             });
             if note_off_button.clicked() {
                 self.active_tab_note_on = false;
-                self.selected_point = None; // Сбрасываем выбранную точку при переключении
+                self.selected_point = None; // Reset selected point when switching
                 
-                // Сохраняем настройку активной вкладки
+                // Save active tab setting
                 self.settings_manager.update_active_curve_tab(1);
                 if self.settings_manager.is_auto_save_enabled() {
                     let _ = self.settings_manager.save();
@@ -772,36 +772,36 @@ impl MidiCurvesApp {
         
         ui.add_space(10.0);
         
-        // Основной layout с горизонтальным разделением
+        // Main layout with horizontal split
         ui.horizontal(|ui| {
-            // Определяем тип кривой для использования в обеих панелях
+            // Determine curve type for use in both panels
             let curve_type = if self.active_tab_note_on { "NoteOn" } else { "NoteOff" };
             
-            // Левая часть - график с подписью и управлением
+            // Left part - graph with title and controls
             ui.vertical(|ui| {
                 ui.set_min_width(600.0);
                 
-                // Заголовок графика
+                // Graph title
                 ui.label(egui::RichText::new(format!("🎯 {} Curve Editor", curve_type)).size(16.0));
                 
-                // Область графика
+                // Graph area
                 ui.add_space(5.0);
                 let (response, painter) = ui.allocate_painter(
                     egui::vec2(600.0, 400.0),
                     Sense::click_and_drag(),
                 );
                 
-                // Обработка взаимодействия с кривой
+                // Handle curve interaction
                 self.handle_curve_interaction(&response);
                 
-                // Отрисовка кривой
+                // Draw curve
                 self.draw_curve(&painter, response.rect);
                 
-                // Убираем информацию о точках из левой панели - теперь она будет в правой панели
+                // Remove point information from left panel - now it will be in right panel
                 
                 ui.add_space(10.0);
                 
-                // Информация о выбранной точке
+                // Selected point information
                 if let Some(index) = self.selected_point {
                     let dual_curve = self.dual_curve.lock().unwrap();
                     let points = if self.active_tab_note_on {
@@ -824,10 +824,10 @@ impl MidiCurvesApp {
 
 ui.add_space(5.0);
 
-// Инструкции для работы с кривой
+// Curve work instructions
 ui.label(egui::RichText::new("Double click - add point. Right click - delete point").size(12.0));
 
-// Индикация режима тонкого перемещения
+// Fine movement mode indication
 if self.shift_pressed {
     ui.colored_label(
         egui::Color32::from_rgb(100, 200, 100),
@@ -842,7 +842,7 @@ if self.shift_pressed {
 
 ui.add_space(5.0);
 
-// Кнопки управления
+// Control buttons
 ui.horizontal(|ui| {
     if ui.button("🔄 Reset to Linear").clicked() {
         self.reset_curve();
@@ -850,14 +850,14 @@ ui.horizontal(|ui| {
 });
 });
 
-            // Правая часть - панели
+            // Right part - panels
             ui.vertical(|ui| {
                 ui.set_min_width(400.0);
                 
-                // Добавляем отступ для выравнивания с заголовком графика
+                // Add padding for alignment with graph title
                 ui.add_space(31.0);
                 
-                // MIDI панель
+                // MIDI panel
                 egui::Frame::group(ui.style())
                     .fill(egui::Color32::from_gray(30))
                     .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(60)))
@@ -867,7 +867,7 @@ ui.horizontal(|ui| {
                 
                 ui.add_space(10.0);
                 
-                // Панель пресетов
+                // Presets panel
                 egui::Frame::group(ui.style())
                     .fill(egui::Color32::from_gray(30))
                     .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(60)))
@@ -881,11 +881,11 @@ ui.horizontal(|ui| {
     
     
     fn draw_test_panel(&mut self, ui: &mut egui::Ui) {
-        ui.label(egui::RichText::new("🎯 Тест кривой").size(12.0));
+        ui.label(egui::RichText::new("🎯 Curve Test").size(12.0));
         ui.add_space(3.0);
         
-        // Используем интерактивный слайдер для тестового значения
-        let mut test_velocity = 64; // Начальное значение
+        // Use interactive slider for test value
+        let mut test_velocity = 64; // Initial value
         ui.horizontal(|ui| {
             ui.label("Velocity:");
             ui.add(egui::Slider::new(&mut test_velocity, 0..=127).show_value(false));
@@ -896,11 +896,11 @@ ui.horizontal(|ui| {
         
         ui.add_space(5.0);
         
-        // Визуальная индикация
+        // Visual indication
         ui.vertical(|ui| {
             let bar_width = 200.0;
             
-            // Полоса входного значения
+            // Input value bar
             ui.horizontal(|ui| {
                 ui.label("In:");
                 let input_ratio = test_velocity as f32 / 127.0;
@@ -911,7 +911,7 @@ ui.horizontal(|ui| {
                 );
             });
             
-            // Полоса выходного значения
+            // Output value bar
             ui.horizontal(|ui| {
                 ui.label("Out:");
                 let output_ratio = output_velocity as f32 / 127.0;
@@ -925,7 +925,7 @@ ui.horizontal(|ui| {
         
         ui.add_space(3.0);
         
-        if ui.button("🧪 Тест").clicked() {
+        if ui.button("🧪 Test").clicked() {
             self.test_curve();
         }
     }
@@ -948,19 +948,19 @@ fn draw_presets_panel(&mut self, ui: &mut egui::Ui) {
         
         // Preset control buttons
         ui.horizontal(|ui| {
-            // Кнопка Save теперь открывает диалог
+            // Save button now opens dialog
             if ui.button("💾 Save").clicked() {
                 self.open_save_preset_dialog();
             }
             
-// Кнопка Delete остается
+// Delete button remains
             if ui.button("🗑️ Delete").clicked() {
                 if let Some(selected_preset) = &self.selected_preset {
                     let should_auto_save = {
                         let mut manager = self.preset_manager.lock().unwrap();
                         let result = manager.remove_preset(selected_preset);
                         if let Err(e) = result {
-                            eprintln!("Ошибка удаления пресета: {}", e);
+                            eprintln!("Preset deletion error: {}", e);
                             false
                         } else {
                             true
@@ -970,11 +970,11 @@ fn draw_presets_panel(&mut self, ui: &mut egui::Ui) {
                     if should_auto_save {
                         self.selected_preset = None;
                         
-                        // Сохраняем настройки после выхода из блокировки
+                        // Save settings after releasing lock
                         let auto_save = self.settings_manager.is_auto_save_enabled();
                         if auto_save {
                             if let Err(e) = self.save_settings() {
-                                eprintln!("Ошибка автосохранения настроек: {}", e);
+                                eprintln!("Auto-save settings error: {}", e);
                             }
                         }
                     }
@@ -992,7 +992,7 @@ fn draw_presets_panel(&mut self, ui: &mut egui::Ui) {
                 if preset_names.is_empty() {
                     ui.colored_label(
                         egui::Color32::from_gray(120),
-                        "Нет сохраненных пресетов"
+                        "No saved presets"
                     );
                 } else {
                     for preset_name in preset_names {
@@ -1005,7 +1005,7 @@ fn draw_presets_panel(&mut self, ui: &mut egui::Ui) {
                         
                         if ui.selectable_label(is_selected, label_text).clicked() {
                             self.selected_preset = Some(preset_name.clone());
-                            // Загружаем пресет сразу при клике на название
+                            // Load preset immediately when clicking on name
                             self.load_preset(&preset_name);
                         }
                     }
@@ -1022,13 +1022,13 @@ fn draw_presets_panel(&mut self, ui: &mut egui::Ui) {
             let mut hi_res_enabled = self.dual_curve.lock().unwrap().is_hi_res_enabled();
             
             if ui.checkbox(&mut hi_res_enabled, "Enable Hi-Res MIDI (14-bit)").clicked() {
-                // Обновляем состояние в dual_curve
+                // Update state in dual_curve
                 self.dual_curve.lock().unwrap().set_hi_res_enabled(hi_res_enabled);
                 
-                // Обновляем в MIDI менеджере тоже (синхронизация)
-                // (dual_curve уже является Arc, поэтому изменения автоматически распространятся)
+                // Update in MIDI manager too (synchronization)
+                // (dual_curve is already Arc, so changes will propagate automatically)
                 
-                // Сохраняем в настройки
+                // Save to settings
                 self.settings_manager.set_hi_res_enabled(hi_res_enabled);
                 self.auto_save_settings();
             }
@@ -1198,14 +1198,14 @@ fn draw_presets_panel(&mut self, ui: &mut egui::Ui) {
     }
     
     fn handle_curve_interaction(&mut self, response: &Response) {
-        // Клик для выбора точки
+        // Click to select point
         if response.clicked() {
             if let Some(hover_pos) = response.hover_pos() {
                 self.selected_point = self.find_point_at(hover_pos, response.rect);
             }
         }
         
-        // Перетаскивание точки
+        // Point dragging
         if response.dragged() {
             if self.selected_point.is_some() {
                 if let Some(hover_pos) = response.hover_pos() {
@@ -1214,29 +1214,29 @@ fn draw_presets_panel(&mut self, ui: &mut egui::Ui) {
             }
         }
         
-        // Отслеживание начала перетаскивания
+        // Track drag start
         if !self.is_dragging && response.dragged() && self.selected_point.is_some() {
             self.is_dragging = true;
         }
         
-        // Сохранение настроек при отпускании кнопки мыши (drag release)
+        // Save settings when mouse button released (drag release)
         if response.drag_stopped() && self.is_dragging {
-            // Мышь отпущена - точка была перемещена
+            // Mouse released - point was moved
             self.is_dragging = false;
-            // Сбрасываем selected_preset т.к. кривая изменена вручную
+            // Reset selected_preset since curve was manually modified
             self.selected_preset = None;
-            // Сохраняем настройки
+            // Save settings
             self.auto_save_settings();
         }
         
-        // Двойной клик для добавления точки
+        // Double click to add point
         if response.double_clicked() {
             if let Some(hover_pos) = response.hover_pos() {
                 self.add_control_point(hover_pos, response.rect);
             }
         }
         
-        // Правый клик для удаления точки
+        // Right click to delete point
         if response.secondary_clicked() {
             if let Some(hover_pos) = response.hover_pos() {
                 if let Some(point_idx) = self.find_point_at(hover_pos, response.rect) {
@@ -1248,17 +1248,17 @@ fn draw_presets_panel(&mut self, ui: &mut egui::Ui) {
     }
     
     fn draw_curve(&mut self, painter: &Painter, rect: Rect) {
-        // Отрисовка сетки
+        // Draw grid
         self.draw_grid(painter, rect);
         
-        // Отрисовка кривой Безье с контрольными точками
+        // Draw Bezier curve with control points
         self.draw_bezier_curve(painter, rect);
     }
     
     fn draw_grid(&self, painter: &Painter, rect: Rect) {
         let grid_color = Color32::from_gray(40);
         
-        // Вертикальные линии
+        // Vertical lines
         for i in 0..=10 {
             let x = rect.left() + rect.width() * i as f32 / 10.0;
             painter.line_segment(
@@ -1267,7 +1267,7 @@ fn draw_presets_panel(&mut self, ui: &mut egui::Ui) {
             );
         }
         
-        // Горизонтальные линии
+        // Horizontal lines
         for i in 0..=10 {
             let y = rect.top() + rect.height() * i as f32 / 10.0;
             painter.line_segment(
@@ -1276,7 +1276,7 @@ fn draw_presets_panel(&mut self, ui: &mut egui::Ui) {
             );
         }
         
-        // Оси
+        // Axes
         let axis_color = Color32::from_gray(100);
         painter.line_segment(
             [Pos2::new(rect.left(), rect.bottom()), Pos2::new(rect.right(), rect.bottom())],
@@ -1301,27 +1301,27 @@ fn draw_bezier_curve(&mut self, painter: &Painter, rect: Rect) {
             return;
         }
         
-        // Строим точки для кривой через интерполяцию
+        // Build curve points through interpolation
         let mut curve_points = Vec::new();
         
-        // Генерируем точки кривой от 0 до 127 (MIDI velocity range)
+        // Generate curve points from 0 to 127 (MIDI velocity range)
         for i in 0..=128 {
             let x_input = i as f32;
             let y_output = curve.evaluate(x_input);
             
-            // Конвертируем в экранные координаты
+            // Convert to screen coordinates
             let screen_x = rect.left() + (x_input / 127.0) * rect.width();
             let screen_y = rect.bottom() - (y_output / 127.0) * rect.height();
             
             curve_points.push(Pos2::new(screen_x, screen_y));
         }
         
-        // Отрисовка кривой как плавная линия
+        // Draw curve as smooth line
         if curve_points.len() >= 2 {
             let curve_color = if self.active_tab_note_on {
-                egui::Color32::from_rgb(100, 200, 255) // Голубая для NoteOn
+                egui::Color32::from_rgb(100, 200, 255) // Blue for NoteOn
             } else {
-                egui::Color32::from_rgb(255, 150, 100) // Оранжевая для NoteOff
+                egui::Color32::from_rgb(255, 150, 100) // Orange for NoteOff
             };
             
             painter.add(egui::Shape::line(
@@ -1330,34 +1330,34 @@ fn draw_bezier_curve(&mut self, painter: &Painter, rect: Rect) {
             ));
         }
         
-        // Рисуем контрольные точки как управляющие элементы
+        // Draw control points as control elements
         for (i, point) in curve.control_points.iter().enumerate() {
             let screen_pos = self.world_to_screen(Pos2::new(point.position.0, point.position.1), rect);
             
-            // Цвет точки зависит от выбранности и типа кривой
+            // Point color depends on selection and curve type
             let (color, stroke_color) = if Some(i) == self.selected_point {
                 if self.active_tab_note_on {
-                    (egui::Color32::from_rgb(255, 100, 100), egui::Color32::RED) // Красный для выбранной NoteOn
+                    (egui::Color32::from_rgb(255, 100, 100), egui::Color32::RED) // Red for selected NoteOn
                 } else {
-                    (egui::Color32::from_rgb(255, 150, 50), egui::Color32::from_rgb(255, 100, 0)) // Оранжевый для выбранной NoteOff
+                    (egui::Color32::from_rgb(255, 150, 50), egui::Color32::from_rgb(255, 100, 0)) // Orange for selected NoteOff
                 }
             } else {
                 if self.active_tab_note_on {
-                    (egui::Color32::from_rgb(255, 150, 150), egui::Color32::from_rgb(200, 100, 100)) // Розовый для NoteOn
+                    (egui::Color32::from_rgb(255, 150, 150), egui::Color32::from_rgb(200, 100, 100)) // Pink for NoteOn
                 } else {
-                    (egui::Color32::from_rgb(255, 180, 120), egui::Color32::from_rgb(200, 120, 50)) // Светло-оранжевый для NoteOff
+                    (egui::Color32::from_rgb(255, 180, 120), egui::Color32::from_rgb(200, 120, 50)) // Light orange for NoteOff
                 }
             };
             
-            // Рисуем точку
+            // Draw point
             painter.circle_filled(screen_pos, 6.0, color);
             painter.circle_stroke(screen_pos, 6.0, egui::Stroke::new(1.0, stroke_color));
             
-            // Номер точки убран для совместимости с VST3 (FontId вызывает панику до Context::run())
+            // Point number removed for VST3 compatibility (FontId causes panic before Context::run())
         }
     }
     
-// Метод draw_control_points удален - отрисовка точек интегрирована в draw_bezier_curve
+// Method draw_control_points removed - point drawing integrated into draw_bezier_curve
 }
 
 fn main() -> Result<(), eframe::Error> {

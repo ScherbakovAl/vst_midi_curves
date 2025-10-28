@@ -1,5 +1,5 @@
-/// Модуль для сохранения и загрузки настроек приложения
-/// Поддерживает кроссплатформенное хранение настроек для Windows, macOS, Linux
+/// Module for saving and loading application settings
+/// Supports cross-platform settings storage for Windows, macOS, Linux
 
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use crate::curve::{DualCurve, ControlPoint};
 
-/// Структура для сохранения состояния контрольной точки
+/// Structure for saving control point state
 #[derive(Serialize, Deserialize, Clone)]
 struct SerializableControlPointData {
     x: f32,
@@ -18,32 +18,32 @@ struct SerializableControlPointData {
     handle_out_y: f32,
 }
 
-/// Основная структура настроек приложения
+/// Main application settings structure
 #[derive(Serialize, Deserialize, Clone)]
 pub struct AppSettings {
-    /// Последние выбранные MIDI порты
+    /// Last selected MIDI ports
     pub last_input_port: Option<String>,
     pub last_output_port: Option<String>,
     
-    /// Состояние кривых (NoteOn и NoteOff)
+    /// Curves state (NoteOn and NoteOff)
     pub note_on_points: Vec<SerializableControlPointData>,
     pub note_off_points: Vec<SerializableControlPointData>,
     
-    /// Последний загруженный пресет
+    /// Last loaded preset
     pub last_preset: Option<String>,
     
-    /// GUI настройки
+    /// GUI settings
     pub active_curve_tab: i32, // 0 = NoteOn, 1 = NoteOff
     
-    /// Дополнительные настройки приложения
+    /// Additional application settings
     pub auto_save_enabled: bool,
     pub show_advanced_controls: bool,
     
-    /// Режим MIDI высокого разрешения (14-бит вместо 7-бит)
+    /// High resolution MIDI mode (14-bit instead of 7-bit)
     pub hi_res_enabled: bool,
 }
 
-/// Менеджер настроек приложения
+/// Application settings manager
 #[derive(Clone)]
 pub struct SettingsManager {
     settings: AppSettings,
@@ -89,16 +89,16 @@ impl Default for AppSettings {
 }
 
 impl SettingsManager {
-    /// Создает новый менеджер настроек (для standalone версии)
+    /// Creates new settings manager (for standalone version)
     pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
         let settings_path = Self::get_settings_path()?;
         
-        // Создаем директорию если её нет
+        // Create directory if it doesn't exist
         if let Some(parent) = settings_path.parent() {
             fs::create_dir_all(parent)?;
         }
         
-        // Загружаем существующие настройки или создаем новые
+        // Load existing settings or create new ones
         let settings = if settings_path.exists() {
             Self::load_from_file(&settings_path)?
         } else {
@@ -111,19 +111,19 @@ impl SettingsManager {
         })
     }
     
-    /// Создает менеджер настроек для VST3 (только в памяти, БЕЗ файловых операций)
+    /// Creates settings manager for VST3 (memory only, NO file operations)
     pub fn new_vst3_safe() -> Self {
         Self {
             settings: AppSettings::default(),
-            settings_path: PathBuf::new(), // Пустой путь - не используется
+            settings_path: PathBuf::new(), // Empty path - not used
         }
     }
     
-    /// Сохраняет текущие настройки (для standalone версии)
+    /// Saves current settings (for standalone version)
     pub fn save(&self) -> Result<(), Box<dyn std::error::Error>> {
-        // Проверяем что путь установлен (не VST3 режим)
+        // Check if path is set (not VST3 mode)
         if self.settings_path.as_os_str().is_empty() {
-            // VST3 режим - игнорируем сохранение без ошибки
+            // VST3 mode - ignore save without error
             return Ok(());
         }
         
@@ -132,22 +132,22 @@ impl SettingsManager {
         Ok(())
     }
     
-    /// Проверяет, работает ли в режиме VST3 (только в памяти)
+    /// Checks if running in VST3 mode (memory only)
     pub fn is_vst3_mode(&self) -> bool {
         self.settings_path.as_os_str().is_empty()
     }
     
-    /// Загружает настройки из файла
+    /// Loads settings from file
     fn load_from_file(path: &Path) -> Result<AppSettings, Box<dyn std::error::Error>> {
         let json = fs::read_to_string(path)?;
         let settings = serde_json::from_str(&json)?;
         Ok(settings)
     }
     
-    /// Возвращает кроссплатформенный путь к файлу настроек
+    /// Returns cross-platform path to settings file
     fn get_settings_path() -> Result<PathBuf, Box<dyn std::error::Error>> {
         let mut config_dir = dirs::config_dir()
-            .ok_or("Не удалось найти директорию конфигурации")?;
+            .ok_or("Failed to find configuration directory")?;
         
         config_dir.push("vst_midi_curves");
         config_dir.push("settings.json");
@@ -155,15 +155,15 @@ impl SettingsManager {
         Ok(config_dir)
     }
     
-    /// Обновляет состояние MIDI портов
+    /// Updates MIDI ports state
     pub fn update_midi_ports(&mut self, input_port: Option<String>, output_port: Option<String>) {
         self.settings.last_input_port = input_port;
         self.settings.last_output_port = output_port;
     }
     
-    /// Обновляет состояние кривых из DualCurve
+    /// Updates curves state from DualCurve
     pub fn update_from_dual_curve(&mut self, dual_curve: &DualCurve) {
-        // Сохраняем точки NoteOn
+        // Save NoteOn points
         self.settings.note_on_points = dual_curve.note_on_curve.control_points
             .iter()
             .map(|point| SerializableControlPointData {
@@ -176,7 +176,7 @@ impl SettingsManager {
             })
             .collect();
         
-        // Сохраняем точки NoteOff
+        // Save NoteOff points
         self.settings.note_off_points = dual_curve.note_off_curve.control_points
             .iter()
             .map(|point| SerializableControlPointData {
@@ -189,13 +189,13 @@ impl SettingsManager {
             })
             .collect();
         
-        // Сохраняем состояние Hi-Res режима
+        // Save Hi-Res mode state
         self.settings.hi_res_enabled = dual_curve.is_hi_res_enabled();
     }
     
-    /// Восстанавливает DualCurve из сохраненных настроек
+    /// Restores DualCurve from saved settings
     pub fn restore_to_dual_curve(&self) -> DualCurve {
-        // Восстанавливаем точки NoteOn
+        // Restore NoteOn points
         let note_on_points = self.settings.note_on_points
             .iter()
             .map(|point| ControlPoint {
@@ -205,7 +205,7 @@ impl SettingsManager {
             })
             .collect();
         
-        // Восстанавливаем точки NoteOff
+        // Restore NoteOff points
         let note_off_points = self.settings.note_off_points
             .iter()
             .map(|point| ControlPoint {
@@ -215,82 +215,82 @@ impl SettingsManager {
             })
             .collect();
         
-        // Создаем DualCurve с точками
+        // Create DualCurve with points
         let mut dual_curve = DualCurve::from_points(note_on_points, note_off_points);
         
-        // Восстанавливаем состояние Hi-Res режима из настроек
+        // Restore Hi-Res mode state from settings
         dual_curve.set_hi_res_enabled(self.settings.hi_res_enabled);
         
         dual_curve
     }
     
-    /// Обновляет последний загруженный пресет
+    /// Updates last loaded preset
     pub fn update_last_preset(&mut self, preset_name: Option<String>) {
         self.settings.last_preset = preset_name;
     }
     
-    /// Обновляет активную вкладку кривой
+    /// Updates active curve tab
     pub fn update_active_curve_tab(&mut self, tab_index: i32) {
         self.settings.active_curve_tab = tab_index;
     }
     
-    /// Обновляет дополнительные настройки GUI
+    /// Updates additional GUI settings
     pub fn update_gui_settings(&mut self, auto_save: bool, show_advanced: bool) {
         self.settings.auto_save_enabled = auto_save;
         self.settings.show_advanced_controls = show_advanced;
     }
     
-    /// Обновляет режим MIDI высокого разрешения
+    /// Updates high resolution MIDI mode
     pub fn set_hi_res_enabled(&mut self, enabled: bool) {
         self.settings.hi_res_enabled = enabled;
     }
     
-    /// Получает состояние режима MIDI высокого разрешения
+    /// Gets high resolution MIDI mode state
     pub fn is_hi_res_enabled(&self) -> bool {
         self.settings.hi_res_enabled
     }
     
-    /// Получает последний выбранный входной порт
+    /// Gets last selected input port
     pub fn get_last_input_port(&self) -> Option<&String> {
         self.settings.last_input_port.as_ref()
     }
     
-    /// Получает последний выбранный выходной порт
+    /// Gets last selected output port
     pub fn get_last_output_port(&self) -> Option<&String> {
         self.settings.last_output_port.as_ref()
     }
     
-    /// Получает последний загруженный пресет
+    /// Gets last loaded preset
     pub fn get_last_preset(&self) -> Option<&String> {
         self.settings.last_preset.as_ref()
     }
     
-    /// Получает активную вкладку кривой
+    /// Gets active curve tab
     pub fn get_active_curve_tab(&self) -> i32 {
         self.settings.active_curve_tab
     }
     
-    /// Проверяет включено ли автосохранение
+    /// Checks if auto-save is enabled
     pub fn is_auto_save_enabled(&self) -> bool {
         self.settings.auto_save_enabled
     }
     
-    /// Проверяет показывать ли расширенные элементы управления
+    /// Checks whether to show advanced controls
     pub fn show_advanced_controls(&self) -> bool {
         self.settings.show_advanced_controls
     }
     
-    /// Сброс настроек к значениям по умолчанию
+    /// Reset settings to default values
     pub fn reset_to_default(&mut self) {
         self.settings = AppSettings::default();
     }
     
-    /// Экспорт настроек в JSON строку
+    /// Export settings to JSON string
     pub fn export_settings(&self) -> Result<String, Box<dyn std::error::Error>> {
         Ok(serde_json::to_string_pretty(&self.settings)?)
     }
     
-    /// Импорт настроек из JSON строки
+    /// Import settings from JSON string
     pub fn import_settings(&mut self, json: &str) -> Result<(), Box<dyn std::error::Error>> {
         let settings: AppSettings = serde_json::from_str(json)?;
         self.settings = settings;
@@ -348,19 +348,19 @@ mod tests {
         
         let mut manager = SettingsManager::default();
         
-        // Создаем DualCurve с тестовыми точками
+        // Create DualCurve with test points
         let mut dual_curve = DualCurve::new();
         dual_curve.add_note_on_point((50.0, 60.0));
         dual_curve.add_note_off_point((70.0, 80.0));
         
-        // Сохраняем в настройки
+        // Save to settings
         manager.update_from_dual_curve(&dual_curve);
         
-        // Восстанавливаем и проверяем
+        // Restore and check
         let restored_curve = manager.restore_to_dual_curve();
         
-        assert_eq!(restored_curve.note_on_curve.control_points.len(), 3); // 2 базовых + 1 добавленная
-        assert_eq!(restored_curve.note_off_curve.control_points.len(), 3); // 2 базовых + 1 добавленная
+        assert_eq!(restored_curve.note_on_curve.control_points.len(), 3); // 2 base + 1 added
+        assert_eq!(restored_curve.note_off_curve.control_points.len(), 3); // 2 base + 1 added
     }
     
     #[test]

@@ -3,42 +3,42 @@ name = "vst_midi_curves"
 version = "0.1.0"
 edition = "2021"
 authors = ["Your Name <your.email@example.com>"]
-description = "VST3 плагин для обработки MIDI velocity с настраиваемыми кривыми Безье"
+description = "VST3 plugin for MIDI velocity processing with customizable Bezier curves"
 license = "MIT"
 repository = "https://github.com/yourusername/vst_midi_curves"
 keywords = ["vst3", "midi", "plugin", "rust", "daw"]
 categories = ["multimedia::audio::plugins"]
 
 [dependencies]
-# VST плагин зависимости
+# VST plugin dependencies
 nih_plug = { git = "https://github.com/robbert-vdh/nih-plug", features = ["vst3", "standalone"] }
 nih_plug_egui = { git = "https://github.com/robbert-vdh/nih-plug" }
 
-# GUI зависимости для standalone
+# GUI dependencies for standalone
 eframe = { version = "0.28", default-features = false, features = ["glow"] }
 egui = "0.28"
 
-# Общие зависимости
+# Common dependencies
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 kurbo = "0.11"
 
-# MIDI зависимости (для будущих версий)
-cpal = "0.15"  # Для аудио/MIDI IO
-midir = "0.8"  # Для MIDI портов
+# MIDI dependencies (for future versions)
+cpal = "0.15"  # For audio/MIDI IO
+midir = "0.8"  # For MIDI ports
 
-# Дополнительные зависимости
-dirs = "5.0"   # Для работы с директориями конфигурации
+# Additional dependencies
+dirs = "5.0"   # For working with configuration directories
 
 [dev-dependencies]
-tempfile = "3.0"   # Для временных файлов в тестах
+tempfile = "3.0"   # For temporary files in tests
 
-# VST3 плагин библиотека
+# VST3 plugin library
 [lib]
 name = "vst_midi_curves"
 crate-type = ["cdylib", "rlib"]
 
-# Standalone приложение
+# Standalone application
 [[bin]]
 name = "midi_curves"
 path = "src/main.rs"

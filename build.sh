@@ -1,124 +1,124 @@
 #!/bin/bash
 
-# Build Script для VST3 MIDI Curves
-# Скрипт автоматической сборки для Linux, macOS и Windows
+# Build Script for VST3 MIDI Curves
+# Automated build script for Linux, macOS and Windows
 
 set -e
 
-echo "🎵 VST3 MIDI Curves - Скрипт сборки"
+echo "🎵 VST3 MIDI Curves - Build Script"
 echo "=================================="
 
-# Проверяем платформу
+# Checking platform
 PLATFORM=$(uname -s)
-echo "🔍 Обнаружена платформа: $PLATFORM"
+echo "🔍 Platform detected: $PLATFORM"
 
 case $PLATFORM in
     "Linux")
-        echo "🐧 Сборка для Linux..."
+        echo "🐧 Building for Linux..."
         cargo build --release --lib
-        echo "✅ Сборка для Linux завершена!"
+        echo "✅ Linux build completed!"
         ;;
     "Darwin")
-        echo "🍎 Сборка для macOS..."
-        
-        # Собираем только библиотеку VST3
-        cargo build --release --lib
-        
-        echo "✅ Сборка для macOS завершена!"
+        echo "🍎 Building for macOS..."
+                
+                # Building VST3 library only
+                cargo build --release --lib
+                
+                echo "✅ macOS build completed!"
         ;;
     *)
-        echo "⚠️  Неподдерживаемая платформа: $PLATFORM"
-        echo "💡 Поддерживаются: Linux, macOS, Windows"
+        echo "⚠️  Unsupported platform: $PLATFORM"
+        echo "💡 Supported platforms: Linux, macOS, Windows"
         exit 1
         ;;
 esac
 
 echo ""
-echo "📦 Создание дистрибутива..."
+echo "📦 Creating distribution..."
 
-# Создаем директорию для сборки
+# Creating build directory
 mkdir -p build/midi_curves_v0.1.0
 
 case $PLATFORM in
     "Linux")
-        # Linux сборка - только VST3 плагин
+        # Linux build - VST3 plugin only
         
-        # Создаем правильную структуру VST3 плагина
+        # Creating proper VST3 plugin structure
         mkdir -p build/midi_curves_v0.1.0/MidiCurves.vst3/Contents/x86_64-linux
         
-        # Проверяем наличие VST3 плагина
+        # Checking for VST3 plugin presence
         VST3_PLUGIN="target/release/deps/libvst_midi_curves.so"
         if [ -f "$VST3_PLUGIN" ]; then
             cp "$VST3_PLUGIN" build/midi_curves_v0.1.0/MidiCurves.vst3/Contents/x86_64-linux/MidiCurves.so
-            echo "✅ VST3 плагин скопирован"
+            echo "✅ VST3 plugin copied"
         else
-            echo "❌ VST3 плагин не найден: $VST3_PLUGIN"
+            echo "❌ VST3 plugin not found: $VST3_PLUGIN"
             exit 1
         fi
         
-        # Копируем Info.plist для Linux
+        # Copying Info.plist for Linux
         if [ -f "Info.plist.linux" ]; then
             cp Info.plist.linux build/midi_curves_v0.1.0/MidiCurves.vst3/Contents/Info.plist
         else
-            echo "❌ Info.plist.linux не найден"
+            echo "❌ Info.plist.linux not found"
             exit 1
         fi
         
-        # Создаем директорию для ресурсов
+        # Creating directory for resources
         mkdir -p build/midi_curves_v0.1.0/MidiCurves.vst3/Contents/Resources
         
-        cp README.md build/midi_curves_v0.1.0/ 2>/dev/null || echo "📄 README.md не найден"
-        cp BUILD_GUIDE.md build/midi_curves_v0.1.0/ 2>/dev/null || echo "📄 BUILD_GUIDE.md не найден"
+        cp README.md build/midi_curves_v0.1.0/ 2>/dev/null || echo "📄 README.md not found"
+        cp BUILD_GUIDE.md build/midi_curves_v0.1.0/ 2>/dev/null || echo "📄 BUILD_GUIDE.md not found"
         
-        echo "🐧 Linux дистрибутив создан: build/midi_curves_v0.1.0/"
-        echo "📝 VST3 плагин создан как MidiCurves.vst3/"
+        echo "🐧 Linux distribution created: build/midi_curves_v0.1.0/"
+        echo "📝 VST3 plugin created as MidiCurves.vst3/"
         ;;
     "Darwin")
-        # macOS сборка - только VST3 плагин
+        # macOS build - VST3 plugin only
         
-        # Создаем правильную структуру VST3 плагина для macOS
+        # Creating proper VST3 plugin structure for macOS
         mkdir -p build/midi_curves_v0.1.0/MidiCurves.vst3/Contents/x86_64-darwin
         mkdir -p build/midi_curves_v0.1.0/MidiCurves.vst3/Contents/aarch64-darwin
         mkdir -p build/midi_curves_v0.1.0/MidiCurves.vst3/Contents/Resources
         
-        # Для упрощения копируем одинаковые файлы для обеих архитектур
+        # For simplicity, copying same files for both architectures
         VST3_PLUGIN="target/release/deps/libvst_midi_curves.dylib"
         if [ -f "$VST3_PLUGIN" ]; then
             cp "$VST3_PLUGIN" build/midi_curves_v0.1.0/MidiCurves.vst3/Contents/x86_64-darwin/MidiCurves
             cp "$VST3_PLUGIN" build/midi_curves_v0.1.0/MidiCurves.vst3/Contents/aarch64-darwin/MidiCurves
-            echo "✅ VST3 плагин скопирован для macOS"
+            echo "✅ VST3 plugin copied for macOS"
         else
-            echo "❌ VST3 плагин не найден для macOS"
+            echo "❌ VST3 plugin not found for macOS"
             exit 1
         fi
         
-        # Копируем Info.plist для macOS
+        # Copying Info.plist for macOS
         if [ -f "Info.plist.linux" ]; then
             cp Info.plist.linux build/midi_curves_v0.1.0/MidiCurves.vst3/Contents/Info.plist
         else
-            echo "❌ Info.plist.linux не найден"
+            echo "❌ Info.plist.linux not found"
             exit 1
         fi
         
-        cp README.md build/midi_curves_v0.1.0/ 2>/dev/null || echo "📄 README.md не найден"
-        cp BUILD_GUIDE.md build/midi_curves_v0.1.0/ 2>/dev/null || echo "📄 BUILD_GUIDE.md не найден"
+        cp README.md build/midi_curves_v0.1.0/ 2>/dev/null || echo "📄 README.md not found"
+        cp BUILD_GUIDE.md build/midi_curves_v0.1.0/ 2>/dev/null || echo "📄 BUILD_GUIDE.md not found"
         
-        echo "🍎 macOS дистрибутив создан: build/midi_curves_v0.1.0/"
+        echo "🍎 macOS distribution created: build/midi_curves_v0.1.0/"
         ;;
 esac
 
 echo ""
-echo "📋 Информация о сборке:"
-echo "- VST3 плагин: $(ls -d build/midi_curves_v0.1.0/*.vst3 2>/dev/null || echo "не найдено")"
+echo "📋 Build information:"
+echo "- VST3 plugin: $(ls -d build/midi_curves_v0.1.0/*.vst3 2>/dev/null || echo "not found")"
 
 echo ""
-echo "🎉 Сборка успешно завершена!"
-echo "📁 Дистрибутив находится в: build/midi_curves_v0.1.0/"
+echo "🎉 Build completed successfully!"
+echo "📁 Distribution located at: build/midi_curves_v0.1.0/"
 echo ""
-echo "📝 Для установки:"
-echo "- Linux: скопировать MidiCurves.vst3 в ~/.vst3/"
-echo "- macOS: скопировать MidiCurves.vst3 в ~/Library/Audio/Plug-Ins/VST3/"
-echo "- Для Reaper: поместить в папку VST3, указанную в настройках"
+echo "📝 For installation:"
+echo "- Linux: copy MidiCurves.vst3 to ~/.vst3/"
+echo "- macOS: copy MidiCurves.vst3 to ~/Library/Audio/Plug-Ins/VST3/"
+echo "- For Reaper: place in VST3 folder specified in settings"
 
 ## for test
 rm -rf /home/sche/.vst3/MidiCurves.vst3

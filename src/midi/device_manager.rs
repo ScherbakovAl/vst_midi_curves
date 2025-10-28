@@ -1,10 +1,10 @@
-//! Управление и обнаружение MIDI устройств
-//! 
-//! Этот модуль отвечает за:
-//! - Автоматическое обнаружение MIDI устройств при запуске
-//! - Отслеживание подключения/отключения устройств
-//! - Обновление списков доступных портов
-//! - Мониторинг состояния устройств
+//! MIDI device management and discovery
+//!
+//! This module is responsible for:
+//! - Automatic MIDI device discovery on startup
+//! - Tracking device connection/disconnection
+//! - Updating available port lists
+//! - Monitoring device status
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use midir::{MidiInput, MidiOutput};
 use super::ports::MidiPortInfo;
 
-// Информация о MIDI устройстве
+// MIDI device information
 #[derive(Debug, Clone)]
 pub struct MidiDevice {
     pub id: String,
@@ -41,30 +41,30 @@ impl MidiDevice {
         }
     }
     
-    /// Определение виртуального устройства по имени
+    /// Determine virtual device by name
     fn is_virtual_device(name: &str) -> bool {
         let name_lower = name.to_lowercase();
-        name_lower.contains("virtual") || 
-        name_lower.contains("iac") || 
+        name_lower.contains("virtual") ||
+        name_lower.contains("iac") ||
         name_lower.contains("loop") ||
         name_lower.contains("vir") ||
         name_lower.contains("virtual midi")
     }
     
-    /// Обновление времени последнего обнаружения
+    /// Update last seen time
     pub fn update_seen(&mut self) {
         self.last_seen = Instant::now();
         self.is_connected = true;
         self.connection_count += 1;
     }
     
-    /// Проверка актуальности устройства
+    /// Check device validity
     pub fn is_current(&self, timeout: Duration) -> bool {
         self.last_seen.elapsed() < timeout && self.is_connected
     }
 }
 
-// Конфигурация Device Manager
+// Device Manager configuration
 #[derive(Debug, Clone)]
 pub struct DeviceManagerConfig {
     pub scan_interval: Duration,
@@ -77,8 +77,8 @@ pub struct DeviceManagerConfig {
 impl Default for DeviceManagerConfig {
     fn default() -> Self {
         Self {
-            scan_interval: Duration::from_millis(500), // Сканирование каждые 500мс
-            device_timeout: Duration::from_secs(10),   // Устройство считается отключенным через 10 сек
+            scan_interval: Duration::from_millis(500), // Scan every 500ms
+            device_timeout: Duration::from_secs(10),   // Device considered disconnected after 10 sec
             auto_reconnect: true,
             prefer_virtual_devices: false,
             enable_hot_plug: true,
@@ -86,7 +86,7 @@ impl Default for DeviceManagerConfig {
     }
 }
 
-// Callback для уведомлений об изменениях устройств
+// Callback for device change notifications
 pub type DeviceChangeCallback = Arc<dyn Fn(DeviceChange) + Send + Sync>;
 
 #[derive(Debug, Clone)]
@@ -97,7 +97,7 @@ pub enum DeviceChange {
     ScanCompleted,
 }
 
-// Менеджер MIDI устройств
+// MIDI device manager
 pub struct DeviceManager {
     devices: HashMap<String, MidiDevice>,
     config: DeviceManagerConfig,
@@ -130,7 +130,7 @@ impl DeviceManager {
         }
     }
     
-    /// Запуск сканирования устройств
+    /// Start device scanning
     pub fn start_scanning(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         if self.is_scanning {
             return Ok(());
@@ -138,16 +138,16 @@ impl DeviceManager {
         
         self.is_scanning = true;
         
-        // Сканируем устройства сразу
+        // Scan devices immediately
         self.scan_ports()?;
         
-        // Запускаем фоновый поток для периодического сканирования
+        // Start background thread for periodic scanning
         if self.config.enable_hot_plug {
             let config = self.config.clone();
             let devices = Arc::new(Mutex::new(HashMap::new()));
             let callbacks = self.change_callbacks.clone();
             
-            // Копируем текущие устройства
+            // Copy current devices
             {
                 let mut device_map = devices.lock().unwrap();
                 for (id, device) in &self.devices {
@@ -159,13 +159,13 @@ impl DeviceManager {
                 loop {
                     thread::sleep(config.scan_interval);
                     
-                    // Сканируем порты
+                    // Scan ports
                     let (input_devices, output_devices) = Self::scan_all_ports();
                     
                     let mut device_map = devices.lock().unwrap();
                     let mut changes = Vec::new();
                     
-                    // Обновляем входные устройства
+                    // Update input devices
                     for device_info in input_devices {
                         let device_id = format!("input_{}", device_info.name.replace(" ", "_"));
                         if let Some(existing_device) = device_map.get_mut(&device_id) {
@@ -182,7 +182,7 @@ impl DeviceManager {
                         }
                     }
                     
-                    // Обновляем выходные устройства
+                    // Update output devices
                     for device_info in output_devices {
                         let device_id = format!("output_{}", device_info.name.replace(" ", "_"));
                         if let Some(existing_device) = device_map.get_mut(&device_id) {
@@ -199,7 +199,7 @@ impl DeviceManager {
                         }
                     }
                     
-                    // Проверяем отключенные устройства
+                    // Check disconnected devices
                     let mut disconnected = Vec::new();
                     for (id, device) in device_map.iter_mut() {
                         if !device.is_current(config.device_timeout) {
@@ -213,7 +213,7 @@ impl DeviceManager {
                         }
                     }
                     
-                    // Уведомляем о изменениях
+                    // Notify about changes
                     if !changes.is_empty() {
                         for callback in &callbacks {
                             for change in &changes {
@@ -225,11 +225,11 @@ impl DeviceManager {
             }));
         }
         
-        println!("🔍 Сканирование MIDI устройств запущено");
+        println!("🔍 MIDI device scanning started");
         Ok(())
     }
     
-    /// Остановка сканирования
+    /// Stop scanning
     pub fn stop_scanning(&mut self) {
         self.is_scanning = false;
         
@@ -237,16 +237,16 @@ impl DeviceManager {
             thread.join().ok();
         }
         
-        println!("🛑 Сканирование MIDI устройств остановлено");
+        println!("🛑 MIDI device scanning stopped");
     }
     
-    /// Сканирование всех доступных портов
+    /// Scan all available ports
     pub fn scan_ports(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let (input_devices, output_devices) = Self::scan_all_ports();
         
         let mut connected_devices = HashMap::new();
         
-        // Обработка входных устройств
+        // Process input devices
         for device_info in input_devices {
             let device_id = format!("input_{}", device_info.name.replace(" ", "_"));
             let device = MidiDevice::new(
@@ -258,7 +258,7 @@ impl DeviceManager {
             connected_devices.insert(device_id, device);
         }
         
-        // Обработка выходных устройств
+        // Process output devices
         for device_info in output_devices {
             let device_id = format!("output_{}", device_info.name.replace(" ", "_"));
             let device = MidiDevice::new(
@@ -270,7 +270,7 @@ impl DeviceManager {
             connected_devices.insert(device_id, device);
         }
         
-        // Обновляем список устройств
+        // Update device list
         let mut connected_count = 0;
         let mut disconnected_count = 0;
         
@@ -283,7 +283,7 @@ impl DeviceManager {
             }
         }
         
-        // Находим отключенные устройства
+        // Find disconnected devices
         let mut to_remove = Vec::new();
         for (id, device) in &self.devices {
             if !connected_devices.contains_key(id) && device.is_current(self.config.device_timeout) {
@@ -298,10 +298,10 @@ impl DeviceManager {
         
         self.last_scan_time = Some(Instant::now());
         
-        println!("📊 Найдено {} новых устройств, отключено {}", connected_count, disconnected_count);
-        println!("📋 Всего доступных устройств: {}", self.devices.len());
+        println!("📊 Found {} new devices, disconnected {}", connected_count, disconnected_count);
+        println!("📋 Total available devices: {}", self.devices.len());
         
-        // Уведомляем об изменениях
+        // Notify about changes
         for callback in &self.change_callbacks {
             callback(DeviceChange::ScanCompleted);
         }
@@ -309,12 +309,12 @@ impl DeviceManager {
         Ok(())
     }
     
-    /// Фактическое сканирование портов
+    /// Actual port scanning
     fn scan_all_ports() -> (Vec<MidiPortInfo>, Vec<MidiPortInfo>) {
         let mut input_devices = Vec::new();
         let mut output_devices = Vec::new();
         
-        // Сканирование входных портов
+        // Scan input ports
         match MidiInput::new("Device Scanner") {
             Ok(midi_input) => {
                 for (i, port) in midi_input.ports().iter().enumerate() {
@@ -330,11 +330,11 @@ impl DeviceManager {
                 }
             }
             Err(e) => {
-                eprintln!("Ошибка сканирования входных портов: {}", e);
+                eprintln!("Input port scan error: {}", e);
             }
         }
         
-        // Сканирование выходных портов
+        // Scan output ports
         match MidiOutput::new("Device Scanner") {
             Ok(midi_output) => {
                 for (i, port) in midi_output.ports().iter().enumerate() {
@@ -350,113 +350,113 @@ impl DeviceManager {
                 }
             }
             Err(e) => {
-                eprintln!("Ошибка сканирования выходных портов: {}", e);
+                eprintln!("Output port scan error: {}", e);
             }
         }
         
         (input_devices, output_devices)
     }
     
-    /// Добавление callback для изменений устройств
+    /// Add callback for device changes
     pub fn add_device_change_callback(&mut self, callback: DeviceChangeCallback) {
         self.change_callbacks.push(callback);
     }
     
-    /// Удаление callback для изменений устройств
+    /// Remove callback for device changes
     pub fn remove_device_change_callback(&mut self, callback: &DeviceChangeCallback) {
         self.change_callbacks.retain(|cb| Arc::ptr_eq(cb, callback));
     }
     
-    /// Получение списка всех доступных устройств
+    /// Get list of all available devices
     pub fn get_all_devices(&self) -> Vec<&MidiDevice> {
         self.devices.values().filter(|d| d.is_current(self.config.device_timeout)).collect()
     }
     
-    /// Получение списка входных устройств
+    /// Get list of input devices
     pub fn get_input_devices(&self) -> Vec<&MidiDevice> {
         self.devices.values()
             .filter(|d| d.is_input)
             .collect()
     }
     
-    /// Получение списка выходных устройств
+    /// Get list of output devices
     pub fn get_output_devices(&self) -> Vec<&MidiDevice> {
         self.devices.values()
             .filter(|d| d.is_output)
             .collect()
     }
     
-    /// Получение имен входных портов
+    /// Get input port names
     pub fn get_input_port_names(&self) -> Vec<String> {
         self.devices.values()
             .filter(|d| d.is_input)
-            .filter(|d| d.is_connected || d.last_seen.elapsed() < Duration::from_secs(30)) // Показываем устройства, которые были видны в последние 30 секунд
+            .filter(|d| d.is_connected || d.last_seen.elapsed() < Duration::from_secs(30)) // Show devices seen in last 30 seconds
             .map(|d| d.name.clone())
             .collect()
     }
     
-    /// Получение имен выходных портов
+    /// Get output port names
     pub fn get_output_port_names(&self) -> Vec<String> {
         self.devices.values()
             .filter(|d| d.is_output)
-            .filter(|d| d.is_connected || d.last_seen.elapsed() < Duration::from_secs(30)) // Показываем устройства, которые были видны в последние 30 секунд
+            .filter(|d| d.is_connected || d.last_seen.elapsed() < Duration::from_secs(30)) // Show devices seen in last 30 seconds
             .map(|d| d.name.clone())
             .collect()
     }
     
-    /// Получение устройства по имени
+    /// Get device by name
     pub fn get_device_by_name(&self, name: &str) -> Option<&MidiDevice> {
         self.devices.values().find(|d| d.name == name)
     }
     
-    /// Получение виртуальных устройств
+    /// Get virtual devices
     pub fn get_virtual_devices(&self) -> Vec<&MidiDevice> {
         self.devices.values()
             .filter(|d| d.is_virtual && d.is_current(self.config.device_timeout))
             .collect()
     }
     
-    /// Получение физических устройств
+    /// Get physical devices
     pub fn get_physical_devices(&self) -> Vec<&MidiDevice> {
         self.devices.values()
             .filter(|d| !d.is_virtual && d.is_current(self.config.device_timeout))
             .collect()
     }
     
-    /// Проверка наличия устройств
+    /// Check if devices exist
     pub fn has_devices(&self) -> bool {
         !self.get_all_devices().is_empty()
     }
     
-    /// Проверка наличия входных устройств
+    /// Check if input devices exist
     pub fn has_input_devices(&self) -> bool {
         !self.get_input_devices().is_empty()
     }
     
-    /// Проверка наличия выходных устройств
+    /// Check if output devices exist
     pub fn has_output_devices(&self) -> bool {
         !self.get_output_devices().is_empty()
     }
     
-    /// Получение времени последнего сканирования
+    /// Get last scan time
     pub fn get_last_scan_time(&self) -> Option<Duration> {
         self.last_scan_time.map(|time| time.elapsed())
     }
     
-    /// Получение конфигурации
+    /// Get configuration
     pub fn get_config(&self) -> &DeviceManagerConfig {
         &self.config
     }
     
-    /// Установка конфигурации
+    /// Set configuration
     pub fn set_config(&mut self, config: DeviceManagerConfig) {
         self.config = config;
     }
     
-    /// Очистка всех устройств
+    /// Clear all devices
     pub fn clear_devices(&mut self) {
         self.devices.clear();
-        println!("🗑️ Очищен список MIDI устройств");
+        println!("🗑️ MIDI device list cleared");
         
         for callback in &self.change_callbacks {
             callback(DeviceChange::DeviceListUpdated);
@@ -470,38 +470,38 @@ impl Drop for DeviceManager {
     }
 }
 
-// Утилиты для работы с Device Manager
+// Utilities for Device Manager
 pub mod utils {
     use super::*;
     
-    /// Создание Device Manager с настройками для разработки
+    /// Create Device Manager with development settings
     pub fn dev_manager_config() -> DeviceManagerConfig {
         DeviceManagerConfig {
-            scan_interval: Duration::from_millis(200), // Быстрое сканирование для разработки
-            device_timeout: Duration::from_secs(5),    // Быстрое отключение для тестирования
+            scan_interval: Duration::from_millis(200), // Fast scanning for development
+            device_timeout: Duration::from_secs(5),    // Fast disconnection for testing
             auto_reconnect: true,
-            prefer_virtual_devices: true, // Предпочитаем виртуальные для разработки
+            prefer_virtual_devices: true, // Prefer virtual for development
             enable_hot_plug: true,
         }
     }
     
-    /// Создание Device Manager с настройками для продакшена
+    /// Create Device Manager with production settings
     pub fn production_manager_config() -> DeviceManagerConfig {
         DeviceManagerConfig {
-            scan_interval: Duration::from_millis(1000), // Медленное сканирование
-            device_timeout: Duration::from_secs(30),    // Долгое ожидание
+            scan_interval: Duration::from_millis(1000), // Slow scanning
+            device_timeout: Duration::from_secs(30),    // Long timeout
             auto_reconnect: true,
             prefer_virtual_devices: false,
             enable_hot_plug: true,
         }
     }
     
-    /// Проверка доступности MIDI системы
+    /// Check MIDI system availability
     pub fn check_midi_system() -> Result<(Vec<String>, Vec<String>), Box<dyn std::error::Error>> {
         let mut input_devices = Vec::new();
         let mut output_devices = Vec::new();
         
-        // Проверка входных портов
+        // Check input ports
         match MidiInput::new("System Check") {
             Ok(midi_input) => {
                 for port in midi_input.ports() {
@@ -510,10 +510,10 @@ pub mod utils {
                     }
                 }
             }
-            Err(e) => return Err(format!("MIDI Input недоступен: {}", e).into()),
+            Err(e) => return Err(format!("MIDI Input unavailable: {}", e).into()),
         }
         
-        // Проверка выходных портов
+        // Check output ports
         match MidiOutput::new("System Check") {
             Ok(midi_output) => {
                 for port in midi_output.ports() {
@@ -522,7 +522,7 @@ pub mod utils {
                     }
                 }
             }
-            Err(e) => return Err(format!("MIDI Output недоступен: {}", e).into()),
+            Err(e) => return Err(format!("MIDI Output unavailable: {}", e).into()),
         }
         
         Ok((input_devices, output_devices))

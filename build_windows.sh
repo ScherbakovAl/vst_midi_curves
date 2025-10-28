@@ -1,46 +1,46 @@
 #!/bin/bash
-# Скрипт сборки для Windows (x86_64)
-# Требует установленного Rust и cross для кросс-компиляции
+# Build script for Windows (x86_64)
+# Requires installed Rust and cross for cross-compilation
 
 set -e
 
-echo "🔨 Начало сборки VST3 плагина для Windows..."
+echo "🔨 Starting VST3 plugin build for Windows..."
 
-# Проверяем наличие Rust
+# Check for Rust presence
 if ! command -v cargo &> /dev/null; then
-    echo "❌ Rust не установлен! Установите с https://rustup.rs/"
+    echo "❌ Rust is not installed! Install from https://rustup.rs/"
     exit 1
 fi
 
-# Устанавливаем cross если его нет
+# Install cross if it's not available
 if ! command -v cross &> /dev/null; then
-    echo "📦 Установка cross для кросс-компиляции..."
+    echo "📦 Installing cross for cross-compilation..."
     cargo install cross
 fi
 
-echo "🏗️ Сборка VST3 плагина..."
+echo "🏗️ Building VST3 plugin..."
 cross build --release --target x86_64-pc-windows-msvc
 
-echo "📁 Создание структуры VST3..."
+echo "📁 Creating VST3 structure..."
 mkdir -p "target/x86_64-pc-windows-msvc/release/vst3"
 cp "target/x86_64-pc-windows-msvc/release/midi_curves_vst3.dll" "target/x86_64-pc-windows-msvc/release/vst3/MidiCurves.vst3"
 
-echo "📦 Создание standalone приложения..."
+echo "📦 Creating standalone application..."
 cross build --release --target x86_64-pc-windows-msvc --bin midi_curves
 cp "target/x86_64-pc-windows-msvc/release/midi_curves.exe" "target/x86_64-pc-windows-msvc/release/"
 
-echo "✅ Сборка завершена!"
-echo "📂 Файлы находятся в:"
+echo "✅ Build completed!"
+echo "📂 Files are located in:"
 echo "   - VST3: target/x86_64-pc-windows-msvc/release/vst3/MidiCurves.vst3"
 echo "   - Standalone: target/x86_64-pc-windows-msvc/release/midi_curves.exe"
 
-# Инструкции по установке
+# Installation instructions
 echo ""
-echo "📋 Инструкции по установке:"
+echo "📋 Installation instructions:"
 echo "VST3:"
-echo "   1. Скопируйте папку MidiCurves.vst3 в"
+echo "   1. Copy the MidiCurves.vst3 folder to"
 echo "      C:\\Program Files\\Common Files\\VST3\\"
 echo ""
 echo "Standalone:"
-echo "   1. Скопируйте midi_curves.exe в желаемую папку"
-echo "   2. Запустите приложение"
+echo "   1. Copy midi_curves.exe to desired folder"
+echo "   2. Launch the application"

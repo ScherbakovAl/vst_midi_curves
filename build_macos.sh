@@ -1,54 +1,54 @@
 #!/bin/bash
-# Скрипт сборки для macOS (Universal Binary: Intel + Apple Silicon)
-# Требует установленного Rust и XCode Command Line Tools
+# Build script for macOS (Universal Binary: Intel + Apple Silicon)
+# Requires installed Rust and XCode Command Line Tools
 
 set -e
 
-echo "🍎 Начало сборки VST3 плагина для macOS..."
+echo "🍎 Starting VST3 plugin build for macOS..."
 
-# Проверяем наличие Rust
+# Check for Rust
 if ! command -v cargo &> /dev/null; then
-    echo "❌ Rust не установлен! Установите с https://rustup.rs/"
+    echo "❌ Rust is not installed! Install from https://rustup.rs/"
     exit 1
 fi
 
-# Проверяем наличие XCode Command Line Tools
+# Check for XCode Command Line Tools
 if ! xcode-select -p &> /dev/null; then
-    echo "❌ XCode Command Line Tools не установлены!"
-    echo "Установите с помощью: xcode-select --install"
+    echo "❌ XCode Command Line Tools are not installed!"
+    echo "Install with: xcode-select --install"
     exit 1
 fi
 
-echo "🏗️ Сборка VST3 плагина для Intel..."
+echo "🏗️ Building VST3 plugin for Intel..."
 cargo build --release --target x86_64-apple-darwin --bin midi_curves_vst3
 
-echo "🏗️ Сборка VST3 плагина для Apple Silicon..."
+echo "🏗️ Building VST3 plugin for Apple Silicon..."
 cargo build --release --target aarch64-apple-darwin --bin midi_curves_vst3
 
-echo "🏗️ Сборка standalone приложения для Intel..."
+echo "🏗️ Building standalone application for Intel..."
 cargo build --release --target x86_64-apple-darwin --bin midi_curves
 
-echo "🏗️ Сборка standalone приложения для Apple Silicon..."
+echo "🏗️ Building standalone application for Apple Silicon..."
 cargo build --release --target aarch64-apple-darwin --bin midi_curves
 
-echo "🔗 Создание Universal Binary..."
-# Создаем universal binary для VST3
+echo "🔗 Creating Universal Binary..."
+# Create universal binary for VST3
 lipo -create \
     "target/x86_64-apple-darwin/release/midi_curves_vst3" \
     "target/aarch64-apple-darwin/release/midi_curves_vst3" \
     -output "target/universal/midi_curves_vst3"
 
-# Создаем universal binary для standalone
+# Create universal binary for standalone
 lipo -create \
     "target/x86_64-apple-darwin/release/midi_curves" \
     "target/aarch64-apple-darwin/release/midi_curves" \
     -output "target/universal/midi_curves"
 
-echo "📁 Создание структуры VST3 для macOS..."
+echo "📁 Creating VST3 structure for macOS..."
 mkdir -p "target/universal/MidiCurves.vst3/Contents/MacOS"
 cp "target/universal/midi_curves_vst3" "target/universal/MidiCurves.vst3/Contents/MacOS/MidiCurves"
 
-# Создаем Info.plist для VST3
+# Create Info.plist for VST3
 cat > "target/universal/MidiCurves.vst3/Contents/Info.plist" << 'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -80,33 +80,33 @@ cat > "target/universal/MidiCurves.vst3/Contents/Info.plist" << 'EOF'
 </plist>
 EOF
 
-# Создаем PkgInfo
+# Create PkgInfo
 echo -n "BNDL????" > "target/universal/MidiCurves.vst3/Contents/PkgInfo"
 
-# Устанавливаем права доступа
+# Set permissions
 chmod -R 755 "target/universal/MidiCurves.vst3"
 chmod 755 "target/universal/MidiCurves.vst3/Contents/MacOS/MidiCurves"
 chmod 755 "target/universal/midi_curves"
 
-echo "✅ Сборка завершена!"
-echo "📂 Файлы находятся в:"
+echo "✅ Build completed!"
+echo "📂 Files are located in:"
 echo "   - VST3: target/universal/MidiCurves.vst3"
 echo "   - Standalone: target/universal/midi_curves"
 
-# Инструкции по установке
+# Installation instructions
 echo ""
-echo "📋 Инструкции по установке:"
+echo "📋 Installation instructions:"
 echo "VST3:"
-echo "   1. Скопируйте папку MidiCurves.vst3 в"
-echo "      /Library/Audio/Plug-Ins/VST3/ (для всех пользователей)"
-echo "   или"
-echo "      ~/Library/Audio/Plug-Ins/VST3/ (только для текущего пользователя)"
+echo "   1. Copy the MidiCurves.vst3 folder to"
+echo "      /Library/Audio/Plug-Ins/VST3/ (for all users)"
+echo "   or"
+echo "      ~/Library/Audio/Plug-Ins/VST3/ (for current user only)"
 echo ""
 echo "Standalone:"
-echo "   1. Переместите midi_curves в папку Applications"
-echo "   2. При первом запуске разрешите в Security & Privacy"
+echo "   1. Move midi_curves to Applications folder"
+echo "   2. Allow in Security & Privacy on first launch"
 echo ""
-echo "🔧 Устранение проблем:"
-echo "Если получаете ошибку 'невозможно проверить разработчика':"
-echo "   1. Откройте System Preferences > Security & Privacy"
-echo "   2. Нажмите 'Allow Anyway' для приложения"
+echo "🔧 Troubleshooting:"
+echo "If you get 'developer cannot be verified' error:"
+echo "   1. Open System Preferences > Security & Privacy"
+echo "   2. Click 'Allow Anyway' for the application"

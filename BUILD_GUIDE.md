@@ -1,162 +1,162 @@
-# Сборка VST3 MIDI Curves
+# VST3 MIDI Curves Build
 
-## 🎯 Обзор проекта
+## 🎯 Project Overview
 
-Ваш проект теперь готов для сборки как VST3 плагин и standalone приложение для всех основных платформ:
+Your project is now ready to build as a VST3 plugin and standalone application for all major platforms:
 
 - **🪟 Windows** (x86_64)
 - **🍎 macOS** (Intel + Apple Silicon Universal Binary)
 - **🐧 Linux** (x86_64)
 
-## 🏗️ Быстрый старт
+## 🏗️ Quick Start
 
-### Предварительные требования
+### Prerequisites
 
-1. **Rust** (версия 1.70+)
+1. **Rust** (version 1.70+)
    ```bash
    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
    rustup update
    ```
 
-2. **Системные зависимости**
-   - **Windows**: `cross` для кросс-компиляции
+2. **System dependencies**
+   - **Windows**: `cross` for cross-compilation
    - **macOS**: XCode Command Line Tools
    - **Linux**: GTK4 development headers
 
-### Команды сборки
+### Build Commands
 
-#### Автоматическая сборка (рекомендуется)
+#### Automatic build (recommended)
 ```bash
-# Сборка для текущей платформы
+# Build for current platform
 ./build.sh current
 
-# Сборка для конкретной платформы
+# Build for specific platform
 ./build.sh windows
 ./build.sh macos
 ./build.sh linux
 
-# Сборка для всех платформ
+# Build for all platforms
 ./build.sh all
 
-# Очистка и пересборка
+# Clean and rebuild
 ./build.sh current --clean
 
-# Справка по командам
+# Command help
 ./build.sh help
 ```
 
-#### Ручная сборка
+#### Manual build
 ```bash
-# VST3 плагин
+# VST3 plugin
 cargo build --release --bin midi_curves_vst3
 
-# Standalone приложение
+# Standalone application
 cargo build --release --bin midi_curves
 ```
 
-## 📋 Детальные инструкции по платформам
+## 📋 Detailed Platform Instructions
 
 ### 🪟 Windows
 
-#### Установка зависимостей
+#### Installing dependencies
 ```bash
-# Установка cross для кросс-компиляции
+# Install cross for cross-compilation
 cargo install cross
 
-# Проверка установки
+# Verify installation
 cross --version
 ```
 
-#### Сборка
+#### Building
 ```bash
-# Использование скрипта
+# Using script
 ./build_windows.sh
 
-# Или ручная сборка
+# Or manual build
 cross build --release --target x86_64-pc-windows-msvc --bin midi_curves_vst3
 cross build --release --target x86_64-pc-windows-msvc --bin midi_curves
 ```
 
-#### Результат сборки
+#### Build Result
 ```
 📂 target/x86_64-pc-windows-msvc/release/
-├── midi_curves_vst3.dll        # VST3 плагин
-└── midi_curves.exe             # Standalone приложение
+├── midi_curves_vst3.dll        # VST3 plugin
+└── midi_curves.exe             # Standalone application
 ```
 
-#### Установка VST3
-1. Скопируйте `midi_curves_vst3.dll` в папку плагинов
-2. Пути установки VST3 для Windows:
+#### VST3 Installation
+1. Copy `midi_curves_vst3.dll` to plugins folder
+2. VST3 installation paths for Windows:
    - `C:\Program Files\Common Files\VST3\`
    - `C:\Users\<username>\Documents\VST3\`
 
-#### Установка Standalone
-1. Скопируйте `midi_curves.exe` в желаемую папку
-2. Запустите приложение
+#### Standalone Installation
+1. Copy `midi_curves.exe` to desired folder
+2. Run the application
 
 ---
 
 ### 🍎 macOS
 
-#### Установка зависимостей
+#### Installing dependencies
 ```bash
 # XCode Command Line Tools
 xcode-select --install
 
-# Проверка установки
+# Verify installation
 xcode-select -p
 ```
 
-#### Сборка
+#### Building
 ```bash
-# Использование скрипта (рекомендуется)
+# Using script (recommended)
 ./build_macos.sh
 
-# Скрипт создаст Universal Binary (Intel + Apple Silicon)
+# Script will create Universal Binary (Intel + Apple Silicon)
 ```
 
-#### Результат сборки
+#### Build Result
 ```
 📂 target/universal/
-├── MidiCurves.vst3/            # VST3 плагин (Universal)
+├── MidiCurves.vst3/            # VST3 plugin (Universal)
 │   ├── Contents/
 │   │   ├── Info.plist
 │   │   ├── PkgInfo
 │   │   └── MacOS/
 │   │       └── MidiCurves      # Universal Binary
-└── midi_curves                 # Standalone приложение (Universal)
+└── midi_curves                 # Standalone application (Universal)
 ```
 
-#### Установка VST3
+#### VST3 Installation
 ```bash
-# Для всех пользователей (требует sudo)
+# For all users (requires sudo)
 sudo cp -r "MidiCurves.vst3" /Library/Audio/Plug-Ins/VST3/
 
-# Для текущего пользователя
+# For current user
 mkdir -p ~/Library/Audio/Plug-Ins/VST3/
 cp -r "MidiCurves.vst3" ~/Library/Audio/Plug-Ins/VST3/
 ```
 
-#### Установка Standalone
+#### Standalone Installation
 ```bash
-# Перемещение в Applications
+# Move to Applications
 cp "midi_curves" /Applications/
 
-# Установка прав (если нужно)
+# Set permissions (if needed)
 chmod +x /Applications/midi_curves
 ```
 
-#### Безопасность macOS
-При первом запуске:
-1. Система может показать предупреждение "невозможно проверить разработчика"
-2. Откройте `System Preferences` > `Security & Privacy`
-3. Нажмите `Allow Anyway` для приложения
+#### macOS Security
+When running for the first time:
+1. System may show "cannot verify developer" warning
+2. Open `System Preferences` > `Security & Privacy`
+3. Click `Allow Anyway` for the application
 
 ---
 
 ### 🐧 Linux
 
-#### Установка зависимостей
+#### Installing dependencies
 
 **Ubuntu/Debian:**
 ```bash
@@ -174,81 +174,81 @@ sudo dnf install pkg-config gtk4-devel gcc gcc-c++ curl wget git
 sudo pacman -S pkg-config gtk4 base-devel curl wget git
 ```
 
-#### Сборка
+#### Building
 ```bash
-# Использование скрипта
+# Using script
 ./build_linux.sh
 
-# Или ручная сборка
+# Or manual build
 cargo build --release --bin midi_curves_vst3
 cargo build --release --bin midi_curves
 ```
 
-#### Результат сборки
+#### Build Result
 ```
 📂 target/release/
-├── midi_curves_vst3.so         # VST3 плагин
-└── midi_curves                 # Standalone приложение
+├── midi_curves_vst3.so         # VST3 plugin
+└── midi_curves                 # Standalone application
 ```
 
-#### Структура VST3 для Linux
+#### VST3 Structure for Linux
 ```bash
 mkdir -p MidiCurves.vst3/Contents/x86_64-linux/
 cp target/release/deps/libvst_midi_curves.so MidiCurves.vst3/Contents/x86_64-linux/MidiCurves.so
 ```
 
-**ВАЖНО:** На Linux VST3 плагин должен иметь расширение `.so`. Многие DAW (включая Reaper) не распознают плагин без этого расширения.
+**IMPORTANT:** On Linux VST3 plugin must have `.so` extension. Many DAWs (including Reaper) do not recognize the plugin without this extension.
 
-#### Установка VST3
+#### VST3 Installation
 ```bash
-# Для текущего пользователя
+# For current user
 mkdir -p ~/.vst3/
 cp -r "MidiCurves.vst3" ~/.vst3/
 
-# Для всех пользователей (требует sudo)
+# For all users (requires sudo)
 sudo cp -r "MidiCurves.vst3" /usr/lib/vst3/
 ```
 
-#### Запуск Standalone
+#### Running Standalone
 ```bash
-# Прямой запуск
+# Direct run
 ./target/release/midi_curves
 
-# С установленным desktop файлом
-# Найдите "MIDI Curves" в меню приложений
+# With installed desktop file
+# Find "MIDI Curves" in applications menu
 ```
 
-## 🔧 Устранение проблем
+## 🔧 Troubleshooting
 
-### Общие проблемы
+### Common Issues
 
-#### 1. Ошибки компиляции
+#### 1. Compilation errors
 ```bash
-# Очистка кэша
+# Clear cache
 cargo clean
 
-# Обновление Rust
+# Update Rust
 rustup update
 
-# Пересборка
+# Rebuild
 cargo build --release
 ```
 
-#### 2. Недостающие зависимости
+#### 2. Missing dependencies
 ```bash
-# Проверка системных зависимостей
-# Windows: Установите Visual Studio Build Tools
+# Check system dependencies
+# Windows: Install Visual Studio Build Tools
 # macOS: xcode-select --install
-# Linux: Проверьте GTK4 и pkg-config
+# Linux: Check GTK4 and pkg-config
 ```
 
-#### 3. Ошибки линковки на Linux
+#### 3. Linking errors on Linux
 ```bash
-# Установка дополнительных библиотек
+# Install additional libraries
 sudo apt install libssl-dev libasound2-dev libudev-dev libcairo2-dev libgdk-pixbuf2.0-dev
 ```
 
-### Специфичные проблемы
+### Specific Issues
 
 #### Windows: "cross not found"
 ```bash
@@ -272,74 +272,74 @@ sudo dnf install pkg-config
 sudo pacman -S pkg-config
 ```
 
-## 📊 Тестирование
+## 📊 Testing
 
-### Тестирование VST3 плагина
+### VST3 Plugin Testing
 
-1. **Компиляция**: Проверьте, что компиляция проходит без ошибок
-2. **Загрузка в DAW**: Протестируйте в популярных DAW:
-   - Reaper (кроссплатформенный)
+1. **Compilation**: Check that compilation completes without errors
+2. **DAW Loading**: Test in popular DAWs:
+   - Reaper (cross-platform)
    - Ableton Live (Windows/macOS)
-   - Logic Pro (только macOS)
-   - FL Studio (только Windows)
+   - Logic Pro (macOS only)
+   - FL Studio (Windows only)
 
-3. **Функциональность**: Проверьте:
-   - Загрузка и сохранение пресетов
-   - Обработка MIDI velocity
-   - GUI отзывчивость
-   - MIDI вход/выход
+3. **Functionality**: Check:
+   - Preset loading and saving
+   - MIDI velocity processing
+   - GUI responsiveness
+   - MIDI input/output
 
-### Тестирование Standalone
+### Standalone Testing
 
-1. **Запуск**: Проверьте запуск приложения
-2. **MIDI порты**: Проверьте обнаружение MIDI устройств
-3. **Обработка**: Протестируйте обработку MIDI событий
-4. **GUI**: Проверьте интерактивность графика
+1. **Launch**: Check application launch
+2. **MIDI ports**: Check MIDI device detection
+3. **Processing**: Test MIDI event processing
+4. **GUI**: Check graph interactivity
 
-## 🚀 Распространение
+## 🚀 Distribution
 
-### Подготовка релизов
+### Release Preparation
 
 ```bash
-# Создание релизной папки
+# Create release folder
 mkdir -p releases/v0.1.0
 cd releases
 
-# Скопируйте все платформенные билды
+# Copy all platform builds
 cp -r ../../target/x86_64-pc-windows-msvc/release/* windows/
 cp -r ../../target/universal/* macos/
 cp -r ../../target/release/* linux/
 
-# Создайте архивы
+# Create archives
 zip -r midi-curves-windows.zip windows/
 zip -r midi-curves-macos.zip macos/
 tar -czf midi-curves-linux.tar.gz linux/
 ```
 
-### Рекомендации по распространению
+### Distribution Recommendations
 
-1. **Подпись кода** (для macOS и Windows)
-2. **Версионирование**: Используйте семантическое версионирование
-3. **Changelog**: Ведите журнал изменений
-4. **Документация**: Предоставьте user manual
+1. **Code signing** (for macOS and Windows)
+2. **Versioning**: Use semantic versioning
+3. **Changelog**: Keep a changelog
+4. **Documentation**: Provide user manual
 
-## 📚 Дополнительные ресурсы
+## 📚 Additional Resources
 
-### Документация
+### Documentation
 - [NIH-plug Book](https://nih-plug.robbert.vdh.org/)
 - [VST3 SDK](https://steinbergmedia.github.io/vst3_doc/)
 - [egui Documentation](https://docs.rs/egui/latest/egui/)
 
-### Примеры проектов
+### Example Projects
 - [NIH-plug Examples](https://github.com/robbert-vdh/nih-plug/tree/master/plugins)
 - [Rust Audio Plugins](https://github.com/rust-audio/)
 
-### Сообщество
+### Community
 - [Rust Audio Discord](https://discord.gg/rust-audio)
-- [NIН-plug Discussions](https://github.com/robbert-vdh/nih-plug/discussions)
+- [NIH-plug Discussions](https://github.com/robbert-vdh/nih-plug/discussions)
 
 ---
 
-**Версия документа:** 1.0  
-**Дата:** 2025-10-25  
-**Статус:** Готов к использованию
+**Document version:** 1.0  
+**Date:** 2025-10-25  
+**Status:** Ready for use

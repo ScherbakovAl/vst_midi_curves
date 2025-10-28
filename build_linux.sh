@@ -1,54 +1,54 @@
 #!/bin/bash
-# Скрипт сборки для Linux (x86_64)
-# Требует установленного Rust и необходимых системных библиотек
+# Build script for Linux (x86_64)
+# Requires installed Rust and necessary system libraries
 
 set -e
 
-echo "🐧 Начало сборки VST3 плагина для Linux..."
+echo "🐧 Starting VST3 plugin build for Linux..."
 
-# Проверяем наличие Rust
+# Check for Rust
 if ! command -v cargo &> /dev/null; then
-    echo "❌ Rust не установлен! Установите с https://rustup.rs/"
+    echo "❌ Rust is not installed! Install from https://rustup.rs/"
     exit 1
 fi
 
-# Проверяем наличие необходимых библиотек для сборки
-echo "📦 Проверка системных зависимостей..."
+# Check for necessary build libraries
+echo "📦 Checking system dependencies..."
 
-# Проверяем наличие pkg-config
+# Check for pkg-config
 if ! command -v pkg-config &> /dev/null; then
-    echo "⚠️  pkg-config не найден. Установите через пакетный менеджер:"
+    echo "⚠️  pkg-config not found. Install via package manager:"
     echo "   Ubuntu/Debian: sudo apt install pkg-config"
     echo "   Fedora: sudo dnf install pkg-config"
     echo "   Arch: sudo pacman -S pkg-config"
 fi
 
-# Проверяем наличие GTK headers (для eframe)
+# Check for GTK headers (for eframe)
 if ! pkg-config --exists gtk4; then
-    echo "⚠️  GTK4 не найден. Установите через пакетный менеджер:"
+    echo "⚠️  GTK4 not found. Install via package manager:"
     echo "   Ubuntu/Debian: sudo apt install libgtk-4-dev"
     echo "   Fedora: sudo dnf install gtk4-devel"
     echo "   Arch: sudo pacman -S gtk4"
 fi
 
-echo "🏗️ Сборка VST3 плагина..."
+echo "🏗️ Building VST3 plugin..."
 cargo build --release --lib
 
-echo "📦 Сборка standalone приложения..."
+echo "📦 Building standalone application..."
 cargo build --release --bin midi_curves
 
-echo "📁 Создание структуры VST3 для Linux..."
+echo "📁 Creating VST3 structure for Linux..."
 mkdir -p "target/release/vst3/x86_64-linux"
 cp "target/release/libvst_midi_curves.so" "target/release/vst3/x86_64-linux/MidiCurves.so"
 
-# Создаем desktop файл для standalone приложения
+# Create desktop file for standalone application
 mkdir -p "target/release/applications"
 cat > "target/release/applications/MidiCurves.desktop" << EOF
 [Desktop Entry]
 Version=1.0
 Type=Application
 Name=MIDI Curves
-Comment=VST3 плагин для обработки MIDI velocity
+Comment=VST3 plugin for MIDI velocity processing
 Exec=$PWD/target/release/midi_curves
 Icon=applications-multimedia
 Terminal=false
@@ -57,35 +57,35 @@ Keywords=vst3;midi;plugin;daw;
 MimeType=application/x-vst3-plugin;
 EOF
 
-# Устанавливаем desktop файл
-echo "📄 Установка desktop файла..."
+# Install desktop file
+echo "📄 Installing desktop file..."
 if command -v xdg-desktop-menu &> /dev/null; then
     xdg-desktop-menu install --mode system "target/release/applications/MidiCurves.desktop"
 fi
 
-echo "✅ Сборка завершена!"
-echo "📂 Файлы находятся в:"
+echo "✅ Build completed!"
+echo "📂 Files are located in:"
 echo "   - VST3: target/release/vst3/x86_64-linux/MidiCurves.so"
 echo "   - Standalone: target/release/midi_curves"
-echo "   - Desktop файл: target/release/applications/MidiCurves.desktop"
+echo "   - Desktop file: target/release/applications/MidiCurves.desktop"
 
-# Инструкции по установке
+# Installation instructions
 echo ""
-echo "📋 Инструкции по установке:"
+echo "📋 Installation instructions:"
 echo "VST3:"
-echo "   1. Скопируйте папку MidiCurves.vst3 в"
-echo "      ~/.vst3/ (для текущего пользователя)"
-echo "   или"
-echo "      /usr/lib/vst3/ (для всех пользователей, требует sudo)"
+echo "   1. Copy the MidiCurves.vst3 folder to"
+echo "      ~/.vst3/ (for current user)"
+echo "   or"
+echo "      /usr/lib/vst3/ (for all users, requires sudo)"
 echo ""
 echo "Standalone:"
-echo "   1. Убедитесь что у вас установлены зависимости:"
+echo "   1. Make sure you have dependencies installed:"
 echo "      sudo apt install libgtk-4-1 libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libspeechd-dev libxkbcommon-dev libssl-dev libasound2-dev libudev-dev libcairo2-dev libgdk-pixbuf2.0-dev"
-echo "   2. Запустите приложение:"
+echo "   2. Run the application:"
 echo "      ./target/release/midi_curves"
 echo ""
-echo "🔧 Устранение проблем:"
-echo "Если возникают ошибки сборки:"
-echo "   1. Обновите Rust: rustup update"
-echo "   2. Очистите сборку: cargo clean"
-echo "   3. Пересоберите: cargo build --release"
+echo "🔧 Troubleshooting:"
+echo "If build errors occur:"
+echo "   1. Update Rust: rustup update"
+echo "   2. Clean build: cargo clean"
+echo "   3. Rebuild: cargo build --release"

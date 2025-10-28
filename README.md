@@ -1,75 +1,75 @@
-# 🎵 VST3 MIDI Curves - Сборка и Использование
+# 🎵 VST3 MIDI Curves - Build and Usage
 
-## 📋 Что было создано
+## 📋 What was created
 
-✅ **VST3 плагин** - Полнофункциональный плагин на основе NIH-plug  
-✅ **Standalone приложение** - Готовое приложение с GUI  
-✅ **Кроссплатформенная сборка** - Windows, macOS, Linux  
-✅ **Автоматические скрипты сборки** - Одной командой для любой платформы  
-✅ **Подробная документация** - BUILD_GUIDE.md с инструкциями  
+✅ **VST3 plugin** - Full-featured plugin based on NIH-plug  
+✅ **Standalone application** - Ready-to-use application with GUI  
+✅ **Cross-platform build** - Windows, macOS, Linux  
+✅ **Automatic build scripts** - One command for any platform  
+✅ **Detailed documentation** - BUILD_GUIDE.md with instructions  
 
-## 🚀 Быстрый старт
+## 🚀 Quick Start
 
-### Для текущей платформы (Linux):
+### For current platform (Linux):
 ```bash
-# Сборка standalone приложения
+# Build standalone application
 cargo build --release --bin midi_curves
 
-# Запуск
+# Run
 ./target/release/midi_curves
 ```
 
-### Для всех платформ:
+### For all platforms:
 ```bash
-# Главный скрипт сборки (автоопределение платформы)
+# Main build script (auto-detect platform)
 ./build.sh current
 
-# Для конкретной платформы
+# For specific platform
 ./build.sh windows
 ./build.sh macos  
 ./build.sh linux
 ```
 
-## 📂 Структура проекта
+## 📂 Project Structure
 
 ```
 vst_midi_curves/
-├── Cargo.toml                    # Конфигурация проекта
+├── Cargo.toml                    # Project configuration
 ├── src/
-│   ├── lib.rs                    # VST3 плагин
-│   ├── main.rs                   # Standalone приложение
-│   ├── curve/                    # Модуль кривых Безье
-│   ├── midi/                     # MIDI обработка
-│   └── presets.rs                # Система пресетов
-├── build.sh                      # Главный скрипт сборки
-├── build_windows.sh              # Сборка для Windows
-├── build_macos.sh                # Сборка для macOS
-├── build_linux.sh                # Сборка для Linux
-└── BUILD_GUIDE.md               # Детальная документация
+│   ├── lib.rs                    # VST3 plugin
+│   ├── main.rs                   # Standalone application
+│   ├── curve/                    # Bezier curves module
+│   ├── midi/                     # MIDI processing
+│   └── presets.rs                # Preset system
+├── build.sh                      # Main build script
+├── build_windows.sh              # Windows build
+├── build_macos.sh                # macOS build
+├── build_linux.sh                # Linux build
+└── BUILD_GUIDE.md               # Detailed documentation
 ```
 
-## 🎯 Что умеет приложение
+## 🎯 Application Features
 
-### Standalone версия:
-- 🎨 **Интерактивный GUI** - Редактирование кривых Безье в реальном времени
-- 🎹 **MIDI вход/выход** - Подключение к MIDI устройствам
-- 📊 **Визуализация** - График кривой с управляющими точками
-- 📁 **Пресеты** - Сохранение и загрузка кривых
-- 🧪 **Тестирование** - Проверка обработки velocity
+### Standalone version:
+- 🎨 **Interactive GUI** - Real-time Bezier curve editing
+- 🎹 **MIDI input/output** - MIDI device connection
+- 📊 **Visualization** - Curve graph with control points
+- 📁 **Presets** - Curve save and load
+- 🧪 **Testing** - Velocity processing verification
 
-### VST3 плагин:
-- 🔌 **DAW интеграция** - Работа в любой VST3-совместимой DAW
-- 🎵 **MIDI обработка** - Трансформация velocity в реальном времени
-- ⚙️ **Настройки** - Интеграция с системой параметров VST3
+### VST3 plugin:
+- 🔌 **DAW integration** - Works in any VST3-compatible DAW
+- 🎵 **MIDI processing** - Real-time velocity transformation
+- ⚙️ **Settings** - Integration with VST3 parameter system
 
-## 🔧 Требования для сборки
+## 🔧 Build Requirements
 
-### Общие:
+### General:
 - Rust 1.70+ 
 - Cargo
 
 ### Windows:
-- `cross` для кросс-компиляции: `cargo install cross`
+- `cross` for cross-compilation: `cargo install cross`
 
 ### macOS:
 - XCode Command Line Tools: `xcode-select --install`
@@ -80,81 +80,81 @@ vst_midi_curves/
   - Fedora: `sudo dnf install gtk4-devel pkg-config`
   - Arch: `sudo pacman -S gtk4 pkg-config`
 
-## 📦 Команды сборки
+## 📦 Build Commands
 
 ```bash
-# Standalone приложение
+# Standalone application
 cargo build --release --bin midi_curves
 
-# VST3 плагин (требует доработки API NIH-plug)
+# VST3 plugin (requires NIH-plug API updates)
 cargo build --release --bin midi_curves_vst3
 
-# Скрипты автоматической сборки
-./build.sh current        # Текущая платформа
+# Automatic build scripts
+./build.sh current        # Current platform
 ./build.sh windows        # Windows
 ./build.sh macos          # macOS (Universal Binary)
 ./build.sh linux          # Linux
-./build.sh all            # Все платформы
-./build.sh help           # Справка
+./build.sh all            # All platforms
+./build.sh help           # Help
 ```
 
-## 🎮 Использование
+## 🎮 Usage
 
-### Standalone приложение:
-1. Соберите приложение: `cargo build --release --bin midi_curves`
-2. Запустите: `./target/release/midi_curves`
-3. Подключите MIDI устройства
-4. Редактируйте кривую перетаскиванием точек
-5. Тестируйте обработку MIDI
+### Standalone application:
+1. Build the application: `cargo build --release --bin midi_curves`
+2. Run: `./target/release/midi_curves`
+3. Connect MIDI devices
+4. Edit curve by dragging points
+5. Test MIDI processing
 
-### VST3 плагин:
-1. Соберите плагин: `cargo build --release --bin midi_curves_vst3`
-2. Скопируйте результат в папку VST3 вашей системы
-3. Загрузите в DAW
-4. Настройте кривую и MIDI routing
+### VST3 plugin:
+1. Build the plugin: `cargo build --release --bin midi_curves_vst3`
+2. Copy the result to your system's VST3 folder
+3. Load in DAW
+4. Configure curve and MIDI routing
 
-## 🛠️ Устранение проблем
+## 🛠️ Troubleshooting
 
-### Ошибки компиляции:
+### Compilation errors:
 ```bash
-# Очистка кэша
+# Clean cache
 cargo clean
 
-# Обновление Rust
+# Update Rust
 rustup update
 
-# Пересборка
+# Rebuild
 cargo build --release
 ```
 
-### VST3 плагин требует доработки:
-NIH-plug API изменился. Нужно обновить:
-- Импорты типов (`Version`, `ReachedWaker`)
-- Реализацию `SysExMessage`
-- Параметры плагина
+### VST3 plugin requires updates:
+NIH-plug API has changed. Need to update:
+- Type imports (`Version`, `ReachedWaker`)
+- `SysExMessage` implementation
+- Plugin parameters
 
-### Linux специфичные:
+### Linux-specific:
 ```bash
-# Установка зависимостей Ubuntu/Debian
+# Install Ubuntu/Debian dependencies
 sudo apt install libgtk-4-dev libssl-dev libasound2-dev libudev-dev
 ```
 
-## 📚 Документация
+## 📚 Documentation
 
-- **BUILD_GUIDE.md** - Детальные инструкции по сборке
-- **ARCHITECTURE.md** - Архитектура проекта
-- **Cargo.toml** - Конфигурация и зависимости
+- **BUILD_GUIDE.md** - Detailed build instructions
+- **ARCHITECTURE.md** - Project architecture
+- **Cargo.toml** - Configuration and dependencies
 
-## 🎯 Результат
+## 🎯 Result
 
-Вы получили:
-- ✅ **Работающее standalone приложение** с полным GUI
-- ✅ **Базовая структура VST3 плагина** (требует финальной доработки)
-- ✅ **Кроссплатформенные скрипты сборки**
-- ✅ **Подробную документацию**
-- ✅ **Готовую архитектуру** для расширения
+You got:
+- ✅ **Working standalone application** with full GUI
+- ✅ **VST3 plugin basic structure** (requires final completion)
+- ✅ **Cross-platform build scripts**
+- ✅ **Detailed documentation**
+- ✅ **Ready architecture** for extension
 
-Standalone версия полностью функциональна и готова к использованию!
-VST3 плагин имеет рабочую основу, но требует финальной доработки NIH-plug API.
+Standalone version is fully functional and ready to use!
+VST3 plugin has a working foundation but requires final NIH-plug API completion.
 
-**Время на доработку VST3: ~2-4 часа для опытного Rust разработчика**
+**Time to complete VST3: ~2-4 hours for experienced Rust developer**

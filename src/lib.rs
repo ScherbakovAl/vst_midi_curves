@@ -1,7 +1,9 @@
+#![doc = "MIDI Curves VST3 Plugin"]
+
 //! MIDI Curves VST3 Plugin
 //!
-//! VST3 плагин для обработки MIDI velocity с настраиваемыми кривыми Безье
-//! Включает систему сохранения и загрузки настроек
+//! VST3 plugin for MIDI velocity processing with customizable Bezier curves
+//! Includes settings save/load system
 
 use std::num::NonZeroU32;
 use std::sync::{Arc, Mutex};
@@ -14,30 +16,30 @@ use crate::midi_simple::SimpleMidiManager;
 use crate::presets::PresetManager;
 use crate::settings::SettingsManager;
 
-// Подключаем все необходимые модули
+// Import all necessary modules
 mod curve;
 mod presets;
 mod midi;
 mod midi_simple;
 mod settings;
 
-// Параметры плагина
+// Plugin parameters
 #[derive(Params)]
 struct MidiCurvesParams {
-    /// Количество контрольных точек в кривой
+    /// Number of control points in the curve
     #[id = "control_points_count"]
     control_points_count: IntParam,
 }
 
-/// Буфер для hi-res MIDI сообщений в VST (CC#88 + NoteOn/Off)
-/// Идентичен HiResBuffer из standalone версии
+/// Buffer for hi-res MIDI messages in VST (CC#88 + NoteOn/Off)
+/// Identical to HiResBuffer from standalone version
 #[derive(Debug, Clone)]
 struct VstHiResBuffer {
-    /// Канал для которого буферизуем
+    /// Channel for which we buffer
     channel: Option<u8>,
-    /// Младшие 7 бит (из CC#88)
+    /// Lower 7 bits (from CC#88)
     lower_bits: Option<u8>,
-    /// Время получения CC#88 для проверки таймаута
+    /// Time when CC#88 was received for timeout checking
     timestamp: Option<std::time::Instant>,
 }
 
@@ -50,35 +52,35 @@ impl VstHiResBuffer {
         }
     }
     
-    /// Сохраняет CC#88 сообщение (как в standalone)
+    /// Stores CC#88 message (as in standalone)
     fn store_cc88(&mut self, channel: u8, lower_bits: u8) {
         self.channel = Some(channel);
         self.lower_bits = Some(lower_bits);
         self.timestamp = Some(std::time::Instant::now());
     }
     
-    /// Извлекает буферизованное значение если доступно, канал совпадает и не истек таймаут
-    /// ВАЖНО: Идентично standalone версии с проверкой таймаута 100мс
+    /// Extracts buffered value if available, channel matches and timeout hasn't expired
+    /// IMPORTANT: Identical to standalone version with 100ms timeout check
     fn extract(&mut self, channel: u8) -> Option<u8> {
         if let (Some(buffered_channel), Some(lower)) = (self.channel, self.lower_bits) {
-            // Проверяем что канал совпадает
+            // Check that channel matches
             if buffered_channel == channel {
-                // Проверяем таймаут (100мс) - как в standalone
+                // Check timeout (100ms) - as in standalone
                 if let Some(ts) = self.timestamp {
                     if ts.elapsed().as_millis() < 100 {
-                        // Очищаем буфер и возвращаем значение
+                        // Clear buffer and return value
                         self.clear();
                         return Some(lower);
                     }
                 }
             }
         }
-        // Если не подошло - очищаем буфер
+        // If not suitable - clear buffer
         self.clear();
         None
     }
     
-    /// Очищает буфер
+    /// Clears the buffer
     fn clear(&mut self) {
         self.channel = None;
         self.lower_bits = None;
@@ -86,28 +88,28 @@ impl VstHiResBuffer {
     }
 }
 
-// Основная структура плагина
+// Main plugin structure
 struct MidiCurvesPlugin {
-    /// Процессор кривой Безье (две кривые: NoteOn и NoteOff)
+    /// Bezier curve processor (two curves: NoteOn and NoteOff)
     dual_curve_processor: Arc<Mutex<DualCurve>>,
     
-    /// Простой MIDI менеджер
+    /// Simple MIDI manager
     midi_manager: Arc<Mutex<SimpleMidiManager>>,
     
-    /// Система пресетов
+    /// Preset system
     preset_manager: Arc<Mutex<PresetManager>>,
     
-    /// Менеджер настроек приложения
+    /// Application settings manager
     settings_manager: SettingsManager,
     
-    /// Состояние GUI
+    /// GUI state
     gui_state: Arc<Mutex<GuiState>>,
     
-    /// Буфер для hi-res MIDI сообщений
+    /// Buffer for hi-res MIDI messages
     hi_res_buffer: Arc<Mutex<VstHiResBuffer>>,
 }
 
-// Структура для GUI состояния
+// Structure for GUI state
 struct GuiController {
     dual_curve_processor: Arc<Mutex<DualCurve>>,
     midi_manager: Arc<Mutex<SimpleMidiManager>>,
@@ -116,12 +118,12 @@ struct GuiController {
     settings_manager: SettingsManager,
 }
 
-// Состояние GUI для VST3 редактора
+// GUI state for VST3 editor
 struct GuiState {
     selected_point: Option<usize>,
     is_dragging: bool,
     last_mouse_pos: Option<egui::Pos2>,
-    active_tab_note_on: bool, // true для NoteOn, false для NoteOff
+    active_tab_note_on: bool, // true for NoteOn, false for NoteOff
 }
 
 impl Default for GuiState {
@@ -130,37 +132,37 @@ impl Default for GuiState {
             selected_point: None,
             is_dragging: false,
             last_mouse_pos: None,
-            active_tab_note_on: true, // По умолчанию NoteOn
+            active_tab_note_on: true, // Default NoteOn
         }
     }
 }
 
 impl Default for MidiCurvesPlugin {
     fn default() -> Self {
-        // VST3: БЕЗОПАСНАЯ инициализация - используем только память, БЕЗ файловых операций
-        // Это предотвращает падение DAW из-за ограничений песочницы
+        // VST3: SAFE initialization - use only memory, NO file operations
+        // This prevents DAW crashes due to sandbox restrictions
         let settings_manager = SettingsManager::new_vst3_safe();
         
-        // Восстанавливаем DualCurve из настроек или создаем новый
+        // Restore DualCurve from settings or create new one
         let dual_curve_processor = Arc::new(Mutex::new(settings_manager.restore_to_dual_curve()));
         
-        // Создаем MIDI менеджер
+        // Create MIDI manager
         let midi_manager = Arc::new(Mutex::new(SimpleMidiManager::new(dual_curve_processor.clone())));
         
-        // VST3: Создаем систему пресетов БЕЗ операций с файловой системой
-        // Используем пустой менеджер и добавляем встроенные пресеты только в памяти
+        // VST3: Create preset system WITHOUT file system operations
+        // Use empty manager and add built-in presets only in memory
         let preset_manager = Arc::new(Mutex::new(PresetManager::new_empty()));
         
-        // Добавляем встроенные пресеты в память (без сохранения на диск)
+        // Add built-in presets to memory (without saving to disk)
         {
             let mut preset_mgr = preset_manager.lock().unwrap();
-            // Создаем встроенные пресеты без сохранения на диск
+            // Create built-in presets without saving to disk
             if let Err(e) = preset_mgr.create_builtin_presets_in_memory() {
-                eprintln!("VST3: Ошибка создания встроенных пресетов: {}. Продолжаем без них.", e);
+                eprintln!("VST3: Error creating built-in presets: {}. Continuing without them.", e);
             }
         }
         
-        // Восстанавливаем настройку hi_res из сохраненных настроек
+        // Restore hi_res setting from saved settings
         {
             let mut dual_curve = dual_curve_processor.lock().unwrap();
             dual_curve.set_hi_res_enabled(settings_manager.is_hi_res_enabled());
@@ -184,8 +186,8 @@ impl Plugin for MidiCurvesPlugin {
     const EMAIL: &'static str = "developer@vst-plugins.org";
     const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 
-    // MIDI-only плагин с минимальным стерео layout для совместимости с Reaper
-    // Reaper требует хотя бы стерео вход/выход, даже для MIDI-only плагинов
+    // MIDI-only plugin with minimal stereo layout for Reaper compatibility
+    // Reaper requires at least stereo input/output, even for MIDI-only plugins
     const AUDIO_IO_LAYOUTS: &'static [AudioIOLayout] = &[
         AudioIOLayout {
             main_input_channels: NonZeroU32::new(2),
@@ -194,7 +196,7 @@ impl Plugin for MidiCurvesPlugin {
         },
     ];
 
-    // Настраиваем MIDI конфигурацию
+    // Configure MIDI configuration
     const MIDI_INPUT: MidiConfig = MidiConfig::Basic;
     const MIDI_OUTPUT: MidiConfig = MidiConfig::Basic;
     
@@ -204,7 +206,7 @@ impl Plugin for MidiCurvesPlugin {
     type SysExMessage = ();
 
     fn params(&self) -> Arc<dyn Params> {
-        // Создаем простую структуру параметров
+        // Create simple parameter structure
         Arc::new(MidiCurvesParams {
             control_points_count: IntParam::new(
                 "Control Points",
@@ -215,7 +217,7 @@ impl Plugin for MidiCurvesPlugin {
     }
 
 fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
-    // Клонируем Arc для использования в замыкании
+    // Clone Arc for use in closure
     let dual_curve_processor = self.dual_curve_processor.clone();
     let gui_state = self.gui_state.clone();
     let preset_manager = self.preset_manager.clone();
@@ -227,18 +229,18 @@ fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Edi
         |_, _| {},
         move |egui_ctx, _setter, _state| {
             egui::CentralPanel::default().show(egui_ctx, |ui| {
-                // Получаем активную вкладку один раз в начале
+                // Get active tab once at the beginning
                 let active_tab_note_on = {
                     let state = gui_state.lock().unwrap();
                     state.active_tab_note_on
                 };
                 
-                // Заголовок
+                // Title
                 ui.horizontal(|ui| {
                     ui.heading("🎵 MIDI Curves VST3");
                     ui.add_space(20.0);
                     
-                    // Переключатель кривых NoteOn/NoteOff
+                    // NoteOn/NoteOff curve switcher
                     ui.label("Curve Type:");
                     if ui.selectable_label(active_tab_note_on, "🎵 NoteOn").clicked() {
                         let mut state = gui_state.lock().unwrap();
@@ -254,16 +256,16 @@ fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Edi
                 
                 ui.add_space(10.0);
                 
-                // Основной layout
+                // Main layout
                 ui.horizontal(|ui| {
-                    // Левая часть - график
+                    // Left part - graph
                     ui.vertical(|ui| {
                         ui.set_min_width(650.0);
                         
                         ui.label("🎯 Curve Editor");
                         ui.add_space(5.0);
                         
-                        // Создаем canvas для отрисовки с фиксированным размером
+                        // Create canvas for drawing with fixed size
                         let (response, painter) = ui.allocate_painter(
                             egui::vec2(600.0, 400.0),
                             egui::Sense::click_and_drag(),
@@ -271,10 +273,10 @@ fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Edi
                 
                 let rect = response.rect;
                 
-                // Рисуем фон
+                // Draw background
                 painter.rect_filled(rect, 0.0, egui::Color32::from_rgb(40, 40, 50));
                 
-                // Вычисляем область для графика
+                // Calculate graph area
                 let margin = 20.0;
                 let graph_rect = egui::Rect::from_min_size(
                     egui::pos2(rect.left() + margin, rect.top() + margin),
@@ -284,15 +286,15 @@ fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Edi
                     )
                 );
                 
-                // Фон графика
+                // Graph background
                 painter.rect_filled(graph_rect, 0.0, egui::Color32::from_rgb(25, 25, 35));
                 
-                // ОБРАБОТКА ВЗАИМОДЕЙСТВИЯ С МЫШЬЮ
-                // Поиск точки под курсором (копируем точки чтобы быстро освободить блокировку)
+                // MOUSE INTERACTION PROCESSING
+                // Find point under cursor (copy points to quickly release lock)
                 let hover_point: Option<usize> = if let Some(hover_pos) = response.hover_pos() {
                     const CLICK_RADIUS: f32 = 12.0;
                     
-                    // Копируем точки и сразу освобождаем блокировку
+                    // Copy points and immediately release lock
                     let control_points_copy = {
                         let curve = dual_curve_processor.lock().unwrap();
                         if active_tab_note_on {
@@ -318,7 +320,7 @@ fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Edi
                     None
                 };
                 
-                // Обработка курсора (без блокировок для избежания дедлока)
+                // Cursor handling (without locks to avoid deadlock)
                 if response.hovered() {
                     let has_selected_point = {
                         let state = gui_state.lock().unwrap();
@@ -334,16 +336,16 @@ fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Edi
                     }
                 }
                 
-                // Клик для выбора точки
+                // Click to select point
                 if response.clicked() {
                     let mut state = gui_state.lock().unwrap();
                     state.selected_point = hover_point;
                 }
                 
-                // Правая кнопка для удаления (избегаем одновременной блокировки)
+                // Right button for deletion (avoid simultaneous locking)
                 if response.secondary_clicked() {
                     if let Some(point_index) = hover_point {
-                        // Сначала проверяем можно ли удалить
+                        // First check if we can delete
                         let can_remove = {
                             let curve = dual_curve_processor.lock().unwrap();
                             if active_tab_note_on {
@@ -354,7 +356,7 @@ fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Edi
                         };
                         
                         if can_remove {
-                            // Удаляем точку
+                            // Remove point
                             {
                                 let mut curve = dual_curve_processor.lock().unwrap();
                                 if active_tab_note_on {
@@ -364,7 +366,7 @@ fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Edi
                                 }
                             }
                             
-                            // Обновляем состояние
+                            // Update state
                             {
                                 let mut state = gui_state.lock().unwrap();
                                 if state.selected_point == Some(point_index) {
@@ -375,10 +377,10 @@ fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Edi
                     }
                 }
                 
-                // Перетаскивание (исправлен порядок блокировок для избежания дедлока)
+                // Dragging (fixed lock order to avoid deadlock)
                 if response.dragged() {
                     if let Some(hover_pos) = response.hover_pos() {
-                        // Сначала получаем selected_point без удержания блокировки
+                        // First get selected_point without holding lock
                         let selected_index = {
                             let state = gui_state.lock().unwrap();
                             state.selected_point
@@ -388,7 +390,7 @@ fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Edi
                             let world_x = ((hover_pos.x - graph_rect.left()) / graph_rect.width() * 127.0).clamp(0.0, 127.0);
                             let world_y = ((graph_rect.bottom() - hover_pos.y) / graph_rect.height() * 127.0).clamp(0.0, 127.0);
                             
-                            // Блокируем curve только после освобождения gui_state
+                            // Lock curve only after releasing gui_state
                             let mut curve = dual_curve_processor.lock().unwrap();
                             if active_tab_note_on {
                                 curve.update_note_on_point(selected_index, (world_x, world_y));
@@ -399,7 +401,7 @@ fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Edi
                     }
                 }
                 
-                // Двойной клик для добавления
+                // Double click to add
                 if response.double_clicked() {
                     if let Some(hover_pos) = response.hover_pos() {
                         let world_x = ((hover_pos.x - graph_rect.left()) / graph_rect.width() * 127.0).clamp(0.0, 127.0);
@@ -414,7 +416,7 @@ fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Edi
                     }
                 }
                 
-                // Отрисовка сетки
+                // Draw grid
                 let grid_color = egui::Color32::from_gray(40);
                 for i in 0..=10 {
                     let x = graph_rect.left() + graph_rect.width() * i as f32 / 10.0;
@@ -431,7 +433,7 @@ fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Edi
                     );
                 }
                 
-                // Оси
+                // Axes
                 let axis_color = egui::Color32::from_gray(100);
                 painter.line_segment(
                     [egui::pos2(graph_rect.left(), graph_rect.bottom()), egui::pos2(graph_rect.right(), graph_rect.bottom())],
@@ -442,14 +444,14 @@ fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Edi
                     egui::Stroke::new(2.0, axis_color),
                 );
                 
-                        // Отрисовка кривой
-                        // КРИТИЧЕСКАЯ ОПТИМИЗАЦИЯ: Минимизируем время блокировки для предотвращения deadlock с аудио потоком
+                        // Curve drawing
+                        // CRITICAL OPTIMIZATION: Minimize lock time to prevent deadlock with audio thread
                         let selected_point = {
                             let state = gui_state.lock().unwrap();
                             state.selected_point
                         };
                         
-                        // Вычисляем ВСЕ точки кривой за одну короткую блокировку
+                        // Calculate ALL curve points in one short lock
                         let (curve_points, control_points_copy) = {
                             let mut curve = dual_curve_processor.lock().unwrap();
                             let active_curve = if active_tab_note_on {
@@ -460,7 +462,7 @@ fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Edi
                             
                             let mut points = Vec::new();
                             if active_curve.control_points.len() >= 2 {
-                                // Вычисляем все 129 точек кривой за один проход
+                                // Calculate all 129 curve points in one pass
                                 for i in 0..=128 {
                                     let x_input = i as f32;
                                     let y_output = active_curve.evaluate(x_input);
@@ -472,13 +474,13 @@ fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Edi
                                 }
                             }
                             
-                            // Копируем контрольные точки
+                            // Copy control points
                             let control_copy = active_curve.control_points.clone();
                             
                             (points, control_copy)
-                        }; // Блокировка освобождена - теперь можно безопасно рисовать
+                        }; // Lock released - now safe to draw
                         
-                        // Отрисовка БЕЗ блокировок
+                        // Drawing WITHOUT locks
                         if curve_points.len() >= 2 {
                             let curve_color = if active_tab_note_on {
                                 egui::Color32::from_rgb(100, 200, 255)
@@ -492,7 +494,7 @@ fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Edi
                             ));
                         }
                         
-                        // Контрольные точки
+                        // Control points
                         for (i, point) in control_points_copy.iter().enumerate() {
                             let screen_x = graph_rect.left() + (point.position.0 / 127.0) * graph_rect.width();
                             let screen_y = graph_rect.bottom() - (point.position.1 / 127.0) * graph_rect.height();
@@ -510,8 +512,8 @@ fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Edi
                         
                         ui.add_space(5.0);
                         
-                        // Информация о выбранной точке
-                        // ИСПРАВЛЕНИЕ DEADLOCK: Получаем selected_point, затем блокируем curve
+                        // Selected point information
+                        // DEADLOCK FIX: Get selected_point, then lock curve
                         let selected_point = {
                             let state = gui_state.lock().unwrap();
                             state.selected_point
@@ -546,35 +548,35 @@ fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Edi
                     
                     ui.add_space(10.0);
                     
-                    // Правая часть - панели управления
+                    // Right part - control panels
                     ui.vertical(|ui| {
                         ui.set_min_width(300.0);
                         
-                        // Панель Hi-Res MIDI
+                        // Hi-Res MIDI panel
                         ui.group(|ui| {
                             ui.label("⚙️ MIDI Settings");
                             
-                            // Получаем текущее состояние
+                            // Get current state
                             let mut hi_res_enabled = dual_curve_processor.lock().unwrap().is_hi_res_enabled();
                             
-                            // Checkbox - используем changed() для отслеживания любых изменений
+                            // Checkbox - use changed() to track any changes
                             let response = ui.checkbox(&mut hi_res_enabled, "Enable Hi-Res MIDI (14-bit)");
                             
-                            // Если checkbox изменился (clicked или programmatically)
+                            // If checkbox changed (clicked or programmatically)
                             if response.changed() {
-                                // Обновляем состояние в dual_curve
+                                // Update state in dual_curve
                                 dual_curve_processor.lock().unwrap().set_hi_res_enabled(hi_res_enabled);
                                 
-                                // Сохраняем в настройки
+                                // Save to settings
                                 let mut settings_mgr = settings_manager.clone();
                                 settings_mgr.set_hi_res_enabled(hi_res_enabled);
                                 let _ = settings_mgr.save();
                                 
-                                // Отладочный вывод для проверки
-                                eprintln!("VST3: Hi-Res режим переключен на: {}", hi_res_enabled);
+                                // Debug output for verification
+                                eprintln!("VST3: Hi-Res mode switched to: {}", hi_res_enabled);
                             }
                             
-                            // Показываем актуальное состояние
+                            // Show current state
                             let current_hi_res = dual_curve_processor.lock().unwrap().is_hi_res_enabled();
                             
                             if current_hi_res {
@@ -587,7 +589,7 @@ fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Edi
                         
                         ui.add_space(10.0);
                         
-                        // Панель пресетов
+                        // Presets panel
                         ui.group(|ui| {
                             ui.label("📁 Presets");
                             
@@ -599,7 +601,7 @@ fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Edi
                                 .show(ui, |ui| {
                                     for preset_name in preset_names {
                                         if ui.button(&preset_name).clicked() {
-                                            // Загружаем пресет только для активной кривой
+                                            // Load preset only for active curve
                                             if let Some(preset) = preset_manager.lock().unwrap().get_preset(&preset_name) {
                                                 let mut curve = dual_curve_processor.lock().unwrap();
                                                 let points = preset.to_control_points();
@@ -619,7 +621,7 @@ fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Edi
                         
                         ui.add_space(10.0);
                         
-                        // Кнопки управления
+                        // Control buttons
                         ui.group(|ui| {
                             ui.label("🎛️ Controls");
                             
@@ -639,7 +641,7 @@ fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Edi
                         
                         ui.add_space(10.0);
                         
-                        // Информация
+                        // Information
                         ui.group(|ui| {
                             ui.label("ℹ️ Info");
                             ui.label(format!("Version: {}", env!("CARGO_PKG_VERSION")));
@@ -669,8 +671,8 @@ fn process(
         _aux: &mut AuxiliaryBuffers,
         context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
-        // ОПТИМИЗАЦИЯ: Минимизируем время блокировки в аудио потоке
-        // Обрабатываем MIDI события
+        // OPTIMIZATION: Minimize lock time in audio thread
+        // Process MIDI events
         while let Some(event) = context.next_event() {
             match event {
                 NoteEvent::MidiCC {
@@ -680,29 +682,29 @@ fn process(
                     value,
                     ..
                 } => {
-                    // Проверяем CC#88 для hi-res режима (как в standalone)
+                    // Check CC#88 for hi-res mode (as in standalone)
                     if cc == 88 {
-                        // Читаем состояние hi-res из dual_curve
+                        // Read hi-res state from dual_curve
                         let hi_res_enabled = {
                             let curve = self.dual_curve_processor.lock().unwrap();
                             curve.is_hi_res_enabled()
-                        }; // Сразу освобождаем блокировку
+                        }; // Immediately release lock
                         
                         if hi_res_enabled {
-                            // Hi-res включен - сохраняем CC#88 в буфер (младшие биты)
+                            // Hi-res enabled - save CC#88 to buffer (lower bits)
                             let ll = (value * 127.0) as u8;
                             self.hi_res_buffer.lock().unwrap().store_cc88(channel, ll);
                             
-                            // Отладка
-                            eprintln!("VST3: Получен CC#88={} на канале {}, буферизован", ll, channel);
+                            // Debug
+                            eprintln!("VST3: Received CC#88={} on channel {}, buffered", ll, channel);
                         } else {
-                            eprintln!("VST3: Получен CC#88, но Hi-Res ВЫКЛЮЧЕН - игнорируем");
+                            eprintln!("VST3: Received CC#88, but Hi-Res is OFF - ignoring");
                         }
-                        // ВАЖНО: В обоих случаях (hi-res включен или нет)
-                        // НЕ отправляем входящий CC#88 дальше (как в standalone)
+                        // IMPORTANT: In both cases (hi-res enabled or not)
+                        // DO NOT send incoming CC#88 further (as in standalone)
                         continue;
                     }
-                    // Остальные CC сообщения пропускаем без изменений
+                    // Pass other CC messages unchanged
                     context.send_event(event);
                 }
                 
@@ -714,7 +716,7 @@ fn process(
                     velocity,
                     ..
                 } => {
-                    // Минимизируем время блокировки - только на время обработки velocity
+                    // Minimize lock time - only during velocity processing
                     let (hi_res_enabled, processed_velocity_or_14bit) = {
                         let mut curve = self.dual_curve_processor.lock().unwrap();
                         let hi_res = curve.is_hi_res_enabled();
@@ -726,7 +728,7 @@ fn process(
                             let velocity_14bit = crate::curve::DualCurve::combine_14bit(ll, hh);
                             let processed = curve.process_note_on_velocity_14bit(velocity_14bit);
                             
-                            // Отладочный вывод
+                            // Debug output
                             eprintln!("VST3 NoteOn: Hi-Res ON, LL={}, HH={}, 14bit_in={}, 14bit_out={}",
                                 ll, hh, velocity_14bit, processed);
                             
@@ -735,13 +737,13 @@ fn process(
                             let processed = curve.process_note_on_velocity((velocity * 127.0) as u8) as u16;
                             (false, processed)
                         }
-                    }; // Блокировка освобождена
+                    }; // Lock released
                     
                     if hi_res_enabled {
                         let (new_ll, new_hh) = crate::curve::DualCurve::split_14bit(processed_velocity_or_14bit);
                         
-                        // Отладка: проверяем что отправляем
-                        eprintln!("VST3: Отправляем CC#88={}, NoteOn velocity={}", new_ll, new_hh);
+                        // Debug: check what we're sending
+                        eprintln!("VST3: Sending CC#88={}, NoteOn velocity={}", new_ll, new_hh);
                         
                         context.send_event(NoteEvent::MidiCC {
                             timing,
@@ -776,7 +778,7 @@ fn process(
                     velocity,
                     ..
                 } => {
-                    // Минимизируем время блокировки - только на время обработки velocity
+                    // Minimize lock time - only during velocity processing
                     let (hi_res_enabled, processed_velocity_or_14bit) = {
                         let mut curve = self.dual_curve_processor.lock().unwrap();
                         let hi_res = curve.is_hi_res_enabled();
@@ -792,7 +794,7 @@ fn process(
                             let processed = curve.process_note_off_velocity((velocity * 127.0) as u8) as u16;
                             (false, processed)
                         }
-                    }; // Блокировка освобождена
+                    }; // Lock released
                     
                     if hi_res_enabled {
                         let (new_ll, new_hh) = crate::curve::DualCurve::split_14bit(processed_velocity_or_14bit);
@@ -823,7 +825,7 @@ fn process(
                 }
                 
                 _ => {
-                    // Все остальные события пропускаем без изменений
+                    // Pass all other events unchanged
                     context.send_event(event);
                 }
             }
@@ -836,7 +838,7 @@ fn process(
 // Implement required traits for VST3 plugin
 impl Vst3Plugin for MidiCurvesPlugin {
     const VST3_CLASS_ID: [u8; 16] = *b"MidiCurvesVST3!!";
-    // Категория для MIDI плагина - Fx|MIDI для MIDI эффектов
+    // Category for MIDI plugin - Fx|MIDI for MIDI effects
     const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] = &[
         Vst3SubCategory::Fx,
         Vst3SubCategory::Tools,
@@ -856,10 +858,10 @@ impl ClapPlugin for MidiCurvesPlugin {
 }
 
 impl GuiController {
-    /// Минималистичная отрисовка GUI БЕЗ ТЕКСТА (не требует шрифтов)
-    /// Только графика: кривая Безье с контрольными точками
+    /// Minimalist GUI drawing WITHOUT TEXT (no fonts required)
+    /// Only graphics: Bezier curve with control points
     fn draw_minimal_gui(&self, ui: &mut egui::Ui) {
-        // Создаем canvas для кривой во весь доступный размер
+        // Create canvas for curve to full available size
         let available_size = ui.available_size();
         let (response, painter) = ui.allocate_painter(
             available_size,
@@ -868,10 +870,10 @@ impl GuiController {
         
         let rect = response.rect;
         
-        // Рисуем фон canvas
+        // Draw canvas background
         painter.rect_filled(rect, 0.0, egui::Color32::from_rgb(40, 40, 50));
         
-        // Вычисляем область для графика (с отступами)
+        // Calculate graph area (with margins)
         let margin = 20.0;
         let graph_rect = egui::Rect::from_min_size(
             egui::pos2(rect.left() + margin, rect.top() + margin),
@@ -881,17 +883,17 @@ impl GuiController {
             )
         );
         
-        // Рисуем фон графика
+        // Draw graph background
         painter.rect_filled(graph_rect, 0.0, egui::Color32::from_rgb(25, 25, 35));
         
-        // Обработка взаимодействий с кривой
+        // Handle curve interactions
         self.handle_curve_interaction(&response);
         
-        // Отрисовка графики (БЕЗ текста - не требует шрифтов!)
+        // Draw graphics (WITHOUT text - no fonts required!)
         self.draw_grid(&painter, graph_rect);
         self.draw_bezier_curve(&painter, graph_rect);
         
-        // Тестовая яркая точка в центре для проверки видимости
+        // Test bright point in center for visibility check
         painter.circle_filled(
             graph_rect.center(),
             15.0,
@@ -899,27 +901,27 @@ impl GuiController {
         );
     }
     
-    /// Редактор кривой
+    /// Curve editor
     fn draw_curve_editor(&self, ui: &mut egui::Ui) {
-        ui.label("🎯 Редактор кривой Безье");
+        ui.label("🎯 Bezier Curve Editor");
         ui.add_space(5.0);
         
-        // Canvas для графика
+        // Canvas for graph
         let (response, painter) = ui.allocate_painter(
             egui::vec2(580.0, 500.0),
             egui::Sense::click_and_drag(),
         );
         
-        // Обработка взаимодействий с кривой
+        // Handle curve interactions
         self.handle_curve_interaction(&response);
         
-        // Отрисовка кривой
+        // Draw curve
         self.draw_bezier_curve(&painter, response.rect);
         
         ui.add_space(10.0);
         
-        // Информация о выбранной точке
-        // ИСПРАВЛЕНИЕ DEADLOCK: Сначала получаем selected_point, затем блокируем curve
+        // Selected point information
+        // DEADLOCK FIX: First get selected_point, then lock curve
         let selected_point = {
             let gui_state = self.gui_state.lock().unwrap();
             gui_state.selected_point
@@ -929,21 +931,21 @@ impl GuiController {
             let curve = self.dual_curve_processor.lock().unwrap();
             if let Some(point) = curve.note_on_curve.control_points.get(index) {
                 ui.label(format!(
-                    "🎯 Выбрана точка {}: ({:.1}, {:.1})",
+                    "🎯 Selected point {}: ({:.1}, {:.1})",
                     index,
                     point.position.0,
                     point.position.1
                 ));
             }
         } else {
-            ui.label("🎯 Точка не выбрана - кликните по кривой для выбора");
+            ui.label("🎯 No point selected - click on curve to select");
         }
         
         ui.add_space(5.0);
         
-        // Кнопки управления точками
+        // Point control buttons
         ui.horizontal(|ui| {
-            if ui.button("➕ Добавить точку").clicked() {
+            if ui.button("➕ Add point").clicked() {
                 if let Some(hover_pos) = response.hover_pos() {
                     let world_pos = self.screen_to_world(hover_pos, response.rect);
                     let mut curve = self.dual_curve_processor.lock().unwrap();
@@ -951,7 +953,7 @@ impl GuiController {
                 }
             }
             
-            if ui.button("❌ Удалить точку").clicked() {
+            if ui.button("❌ Delete point").clicked() {
                 let index = {
                     let gui_state = self.gui_state.lock().unwrap();
                     gui_state.selected_point
@@ -966,7 +968,7 @@ impl GuiController {
                 }
             }
             
-            if ui.button("🔄 Сброс к линейной").clicked() {
+            if ui.button("🔄 Reset to linear").clicked() {
                 let mut curve = self.dual_curve_processor.lock().unwrap();
                 curve.reset_to_linear();
                 
@@ -976,11 +978,11 @@ impl GuiController {
         });
     }
     
-    /// Панель управления
+    /// Control panel
     fn draw_control_panel(&self, ui: &mut egui::Ui) {
-        // Тест кривой
+        // Curve test
         ui.group(|ui| {
-            ui.label("🎯 Тест кривой");
+            ui.label("🎯 Curve test");
             
             let mut test_velocity = 64.0;
             ui.horizontal(|ui| {
@@ -996,7 +998,7 @@ impl GuiController {
             
             ui.add_space(5.0);
             
-            // Визуальная индикация
+            // Visual indication
             ui.vertical(|ui| {
                 let bar_width = 200.0;
                 
@@ -1026,20 +1028,20 @@ impl GuiController {
         
         ui.add_space(10.0);
         
-        // Панель настроек Hi-Res MIDI
+        // Hi-Res MIDI settings panel
         ui.group(|ui| {
             ui.label("⚙️ MIDI Settings");
             
             let mut hi_res_enabled = self.dual_curve_processor.lock().unwrap().is_hi_res_enabled();
             
             if ui.checkbox(&mut hi_res_enabled, "Enable Hi-Res MIDI (14-bit velocity)").clicked() {
-                // Обновляем состояние в dual_curve
+                // Update state in dual_curve
                 self.dual_curve_processor.lock().unwrap().set_hi_res_enabled(hi_res_enabled);
                 
-                // Обновляем в настройках (в памяти, без сохранения на диск в VST3)
+                // Update in settings (in memory, without saving to disk in VST3)
                 self.settings_manager.clone().set_hi_res_enabled(hi_res_enabled);
-                // В VST3 автосохранение на диск отключено
-                let _ = self.settings_manager.clone().save(); // No-op в VST3 режиме
+                // In VST3 auto-save to disk is disabled
+                let _ = self.settings_manager.clone().save(); // No-op in VST3 mode
             }
             
             ui.add_space(5.0);
@@ -1054,21 +1056,21 @@ impl GuiController {
         
         ui.add_space(10.0);
         
-        // Панель пресетов
+        // Presets panel
         ui.group(|ui| {
-            ui.label("📁 Пресеты");
+            ui.label("📁 Presets");
             
             let preset_names = self.preset_manager.lock().unwrap().get_preset_names();
             
             ui.horizontal(|ui| {
-                ui.label("Выбранный пресет:");
+                ui.label("Selected preset:");
                 
                 egui::ComboBox::from_id_source("preset_selector")
                     .selected_text("Linear")
                     .show_ui(ui, |ui| {
                         for preset_name in preset_names {
                             if ui.selectable_label(false, &preset_name).clicked() {
-                                // Загружаем пресет
+                                // Load preset
                                 let mut curve = self.dual_curve_processor.lock().unwrap();
                                 if let Some(preset) = self.preset_manager.lock().unwrap().get_preset(&preset_name) {
                                     curve.load_from_preset(&preset);
@@ -1081,22 +1083,22 @@ impl GuiController {
         
         ui.add_space(10.0);
         
-        // Информация о плагине
+        // Plugin information
         ui.group(|ui| {
-            ui.label("ℹ️ Информация");
-            ui.label(format!("Версия: {}", env!("CARGO_PKG_VERSION")));
-            ui.label("Платформа: VST3 Standalone");
+            ui.label("ℹ️ Information");
+            ui.label(format!("Version: {}", env!("CARGO_PKG_VERSION")));
+            ui.label("Platform: VST3 Standalone");
             
             let curve = self.dual_curve_processor.lock().unwrap();
-            ui.label(format!("Контрольных точек: {}", curve.note_on_curve.control_points.len()));
+            ui.label(format!("Control points: {}", curve.note_on_curve.control_points.len()));
         });
     }
     
-    /// Обработка взаимодействий с кривой
+    /// Handle curve interactions
     fn handle_curve_interaction(&self, response: &egui::Response) {
-        // ИСПРАВЛЕНИЕ DEADLOCK: Разделяем блокировки на отдельные операции
+        // DEADLOCK FIX: Separate locks into individual operations
         
-        // Клик для выбора точки
+        // Click to select point
         if response.clicked() {
             if let Some(hover_pos) = response.hover_pos() {
                 let selected_point = self.find_point_at(hover_pos, response.rect);
@@ -1105,9 +1107,9 @@ impl GuiController {
             }
         }
         
-        // Перетаскивание точки
+        // Dragging point
         if response.dragged() {
-            // Сначала получаем selected_point
+            // First get selected_point
             let selected_index = {
                 let gui_state = self.gui_state.lock().unwrap();
                 gui_state.selected_point
@@ -1122,7 +1124,7 @@ impl GuiController {
             }
         }
         
-        // Отслеживание начала перетаскивания
+        // Track dragging start
         if response.dragged() {
             let mut gui_state = self.gui_state.lock().unwrap();
             if !gui_state.is_dragging && gui_state.selected_point.is_some() {
@@ -1130,7 +1132,7 @@ impl GuiController {
             }
         }
         
-        // Сохранение настроек при отпускании кнопки мыши (drag release)
+        // Save settings on mouse button release (drag release)
         if response.drag_stopped() {
             let should_save = {
                 let mut gui_state = self.gui_state.lock().unwrap();
@@ -1140,12 +1142,12 @@ impl GuiController {
             };
             
             if should_save {
-                // Автосохранение в VST3 отключено - настройки хранятся только в памяти
-                let _ = self.auto_save_settings(); // Игнорируем результат, т.к. в VST3 это no-op
+                // Auto-save disabled in VST3 - settings stored only in memory
+                let _ = self.auto_save_settings(); // Ignore result since it's no-op in VST3
             }
         }
         
-        // Двойной клик для добавления точки
+        // Double click to add point
         if response.double_clicked() {
             if let Some(hover_pos) = response.hover_pos() {
                 let world_pos = self.screen_to_world(hover_pos, response.rect);
@@ -1155,12 +1157,12 @@ impl GuiController {
         }
     }
     
-    /// Отрисовка кривой Безье
+    /// Draw Bezier curve
     fn draw_bezier_curve(&self, painter: &egui::Painter, rect: egui::Rect) {
-        // Отрисовка сетки
+        // Draw grid
         self.draw_grid(painter, rect);
         
-        // ИСПРАВЛЕНИЕ DEADLOCK: Сначала получаем selected_point, затем работаем с curve
+        // DEADLOCK FIX: First get selected_point, then work with curve
         let selected_point = {
             let gui_state = self.gui_state.lock().unwrap();
             gui_state.selected_point
@@ -1171,7 +1173,7 @@ impl GuiController {
             return;
         }
         
-        // Генерируем точки кривой
+        // Generate curve points
         let mut curve_points = Vec::new();
         for i in 0..=128 {
             let x_input = i as f32;
@@ -1183,7 +1185,7 @@ impl GuiController {
             curve_points.push(egui::pos2(screen_x, screen_y));
         }
         
-        // Рисуем кривую
+        // Draw curve
         if curve_points.len() >= 2 {
             painter.add(egui::Shape::line(
                 curve_points,
@@ -1191,7 +1193,7 @@ impl GuiController {
             ));
         }
         
-        // Рисуем контрольные точки
+        // Draw control points
         for (i, point) in curve.note_on_curve.control_points.iter().enumerate() {
             let screen_pos = self.world_to_screen(
                 egui::pos2(point.position.0, point.position.1),
@@ -1207,15 +1209,15 @@ impl GuiController {
             painter.circle_filled(screen_pos, 6.0, color);
             painter.circle_stroke(screen_pos, 6.0, egui::Stroke::new(1.0, egui::Color32::BLACK));
             
-            // Номер точки убран для совместимости с VST3 (FontId вызывает панику до Context::run())
+            // Point number removed for VST3 compatibility (FontId causes panic before Context::run())
         }
     }
     
-    /// Отрисовка сетки
+    /// Draw grid
     fn draw_grid(&self, painter: &egui::Painter, rect: egui::Rect) {
         let grid_color = egui::Color32::from_gray(40);
         
-        // Вертикальные линии
+        // Vertical lines
         for i in 0..=10 {
             let x = rect.left() + rect.width() * i as f32 / 10.0;
             painter.line_segment(
@@ -1224,7 +1226,7 @@ impl GuiController {
             );
         }
         
-        // Горизонтальные линии
+        // Horizontal lines
         for i in 0..=10 {
             let y = rect.top() + rect.height() * i as f32 / 10.0;
             painter.line_segment(
@@ -1233,7 +1235,7 @@ impl GuiController {
             );
         }
         
-        // Оси
+        // Axes
         let axis_color = egui::Color32::from_gray(100);
         painter.line_segment(
             [egui::pos2(rect.left(), rect.bottom()), egui::pos2(rect.right(), rect.bottom())],
@@ -1245,7 +1247,7 @@ impl GuiController {
         );
     }
     
-    /// Конвертация экранных координат в мировые
+    /// Convert screen coordinates to world coordinates
     fn screen_to_world(&self, screen_pos: egui::Pos2, rect: egui::Rect) -> egui::Pos2 {
         egui::pos2(
             (screen_pos.x - rect.left()) / rect.width() * 127.0,
@@ -1253,7 +1255,7 @@ impl GuiController {
         )
     }
     
-    /// Конвертация мировых координат в экранные
+    /// Convert world coordinates to screen coordinates
     fn world_to_screen(&self, world_pos: egui::Pos2, rect: egui::Rect) -> egui::Pos2 {
         egui::pos2(
             rect.left() + world_pos.x / 127.0 * rect.width(),
@@ -1261,7 +1263,7 @@ impl GuiController {
         )
     }
     
-    /// Поиск точки под курсором
+    /// Find point under cursor
     fn find_point_at(&self, screen_pos: egui::Pos2, rect: egui::Rect) -> Option<usize> {
         const CLICK_RADIUS: f32 = 12.0;
         let curve = self.dual_curve_processor.lock().unwrap();
@@ -1278,48 +1280,48 @@ impl GuiController {
     }
 }
 
-// Реализация плагина
+// Plugin implementation
 impl MidiCurvesPlugin {
-    /// Сохраняет текущие настройки плагина
-    /// В VST3 режиме только обновляет настройки в памяти
+    /// Saves current plugin settings
+    /// In VST3 mode only updates settings in memory
     pub fn save_settings(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        // Обновляем состояние кривых в настройках (в памяти)
+        // Update curve state in settings (in memory)
         self.settings_manager.update_from_dual_curve(&self.dual_curve_processor.lock().unwrap());
         
-        // В VST3 это no-op (не записывает на диск), в standalone сохраняет в файл
+        // In VST3 this is no-op (doesn't write to disk), in standalone saves to file
         self.settings_manager.save()
     }
     
-    /// Восстанавливает настройки плагина из памяти
+    /// Restores plugin settings from memory
     pub fn load_settings(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        // Восстанавливаем DualCurve из настроек (из памяти в VST3)
+        // Restore DualCurve from settings (from memory in VST3)
         let restored_curve = self.settings_manager.restore_to_dual_curve();
         *self.dual_curve_processor.lock().unwrap() = restored_curve;
         
         Ok(())
     }
     
-    /// Сбрасывает плагин к настройкам по умолчанию (только в памяти в VST3)
+    /// Resets plugin to default settings (only in memory in VST3)
     pub fn reset_to_defaults(&mut self) {
         self.settings_manager.reset_to_default();
         
-        // Применяем сброшенные настройки
+        // Apply reset settings
         let _ = self.load_settings();
     }
 }
 
-// Реализация GuiController
+// GuiController implementation
 impl GuiController {
-    /// Автоматически сохраняет настройки если включено автосохранение
-    /// В VST3 режиме только обновляет настройки в памяти без записи на диск
+    /// Automatically saves settings if auto-save is enabled
+    /// In VST3 mode only updates settings in memory without writing to disk
     fn auto_save_settings(&self) -> Result<(), Box<dyn std::error::Error>> {
-        // Обновляем состояние кривых в настройках (в памяти)
+        // Update curve state in settings (in memory)
         let dual_curve = self.dual_curve_processor.lock().unwrap();
         let mut settings_manager = self.settings_manager.clone();
         settings_manager.update_from_dual_curve(&dual_curve);
         
-        // В VST3 режиме save() является no-op (не записывает на диск)
-        // В standalone режиме сохраняет в файл, если автосохранение включено
+        // In VST3 mode save() is no-op (doesn't write to disk)
+        // In standalone mode saves to file if auto-save is enabled
         if self.settings_manager.is_auto_save_enabled() {
             settings_manager.save()
         } else {
@@ -1328,5 +1330,5 @@ impl GuiController {
     }
 }
 
-// Экспорт плагина
+// Plugin export
 nih_plug::nih_export_vst3!(MidiCurvesPlugin);
