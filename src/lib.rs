@@ -267,19 +267,22 @@ fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Edi
                 painter.rect_filled(graph_rect, 0.0, egui::Color32::from_rgb(25, 25, 35));
                 
                 // ОБРАБОТКА ВЗАИМОДЕЙСТВИЯ С МЫШЬЮ
-                // Поиск точки под курсором
+                // Поиск точки под курсором (копируем точки чтобы быстро освободить блокировку)
                 let hover_point: Option<usize> = if let Some(hover_pos) = response.hover_pos() {
                     const CLICK_RADIUS: f32 = 12.0;
-                    let curve = dual_curve_processor.lock().unwrap();
                     
-                    let control_points = if active_tab_note_on {
-                        &curve.note_on_curve.control_points
-                    } else {
-                        &curve.note_off_curve.control_points
+                    // Копируем точки и сразу освобождаем блокировку
+                    let control_points_copy = {
+                        let curve = dual_curve_processor.lock().unwrap();
+                        if active_tab_note_on {
+                            curve.note_on_curve.control_points.clone()
+                        } else {
+                            curve.note_off_curve.control_points.clone()
+                        }
                     };
                     
                     let mut result = None;
-                    for (i, point) in control_points.iter().enumerate() {
+                    for (i, point) in control_points_copy.iter().enumerate() {
                         let screen_x = graph_rect.left() + (point.position.0 / 127.0) * graph_rect.width();
                         let screen_y = graph_rect.bottom() - (point.position.1 / 127.0) * graph_rect.height();
                         let screen_pos = egui::pos2(screen_x, screen_y);
@@ -294,14 +297,14 @@ fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Edi
                     None
                 };
                 
-                // Обработка курсора
+                // Обработка курсора (без блокировок для избежания дедлока)
                 if response.hovered() {
-                    let is_dragging = {
+                    let has_selected_point = {
                         let state = gui_state.lock().unwrap();
-                        response.dragged() && state.selected_point.is_some()
+                        state.selected_point.is_some()
                     };
                     
-                    if is_dragging {
+                    if response.dragged() && has_selected_point {
                         ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
                     } else if hover_point.is_some() {
                         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
@@ -316,44 +319,55 @@ fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Edi
                     state.selected_point = hover_point;
                 }
                 
-                // Правая кнопка для удаления
+                // Правая кнопка для удаления (избегаем одновременной блокировки)
                 if response.secondary_clicked() {
                     if let Some(point_index) = hover_point {
-                        let mut curve = dual_curve_processor.lock().unwrap();
-                        let mut state = gui_state.lock().unwrap();
-                        
-                        let can_remove = if active_tab_note_on {
-                            curve.note_on_curve.control_points.len() > 2
-                        } else {
-                            curve.note_off_curve.control_points.len() > 2
+                        // Сначала проверяем можно ли удалить
+                        let can_remove = {
+                            let curve = dual_curve_processor.lock().unwrap();
+                            if active_tab_note_on {
+                                curve.note_on_curve.control_points.len() > 2
+                            } else {
+                                curve.note_off_curve.control_points.len() > 2
+                            }
                         };
                         
                         if can_remove {
-                            if active_tab_note_on {
-                                curve.remove_note_on_point(point_index);
-                            } else {
-                                curve.remove_note_off_point(point_index);
+                            // Удаляем точку
+                            {
+                                let mut curve = dual_curve_processor.lock().unwrap();
+                                if active_tab_note_on {
+                                    curve.remove_note_on_point(point_index);
+                                } else {
+                                    curve.remove_note_off_point(point_index);
+                                }
                             }
                             
-                            if state.selected_point == Some(point_index) {
-                                state.selected_point = None;
+                            // Обновляем состояние
+                            {
+                                let mut state = gui_state.lock().unwrap();
+                                if state.selected_point == Some(point_index) {
+                                    state.selected_point = None;
+                                }
                             }
                         }
                     }
                 }
                 
-                // Перетаскивание
+                // Перетаскивание (исправлен порядок блокировок для избежания дедлока)
                 if response.dragged() {
-                    let selected_index = {
-                        let state = gui_state.lock().unwrap();
-                        state.selected_point
-                    };
-                    
-                    if let Some(selected_index) = selected_index {
-                        if let Some(hover_pos) = response.hover_pos() {
+                    if let Some(hover_pos) = response.hover_pos() {
+                        // Сначала получаем selected_point без удержания блокировки
+                        let selected_index = {
+                            let state = gui_state.lock().unwrap();
+                            state.selected_point
+                        };
+                        
+                        if let Some(selected_index) = selected_index {
                             let world_x = ((hover_pos.x - graph_rect.left()) / graph_rect.width() * 127.0).clamp(0.0, 127.0);
                             let world_y = ((graph_rect.bottom() - hover_pos.y) / graph_rect.height() * 127.0).clamp(0.0, 127.0);
                             
+                            // Блокируем curve только после освобождения gui_state
                             let mut curve = dual_curve_processor.lock().unwrap();
                             if active_tab_note_on {
                                 curve.update_note_on_point(selected_index, (world_x, world_y));
@@ -408,63 +422,75 @@ fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Edi
                 );
                 
                         // Отрисовка кривой
-                        let mut curve = dual_curve_processor.lock().unwrap();
+                        // КРИТИЧЕСКАЯ ОПТИМИЗАЦИЯ: Минимизируем время блокировки для предотвращения deadlock с аудио потоком
                         let selected_point = {
                             let state = gui_state.lock().unwrap();
                             state.selected_point
                         };
                         
-                        let active_curve = if active_tab_note_on {
-                            &mut curve.note_on_curve
-                        } else {
-                            &mut curve.note_off_curve
-                        };
+                        // Вычисляем ВСЕ точки кривой за одну короткую блокировку
+                        let (curve_points, control_points_copy) = {
+                            let mut curve = dual_curve_processor.lock().unwrap();
+                            let active_curve = if active_tab_note_on {
+                                &mut curve.note_on_curve
+                            } else {
+                                &mut curve.note_off_curve
+                            };
+                            
+                            let mut points = Vec::new();
+                            if active_curve.control_points.len() >= 2 {
+                                // Вычисляем все 129 точек кривой за один проход
+                                for i in 0..=128 {
+                                    let x_input = i as f32;
+                                    let y_output = active_curve.evaluate(x_input);
+                                    
+                                    let screen_x = graph_rect.left() + (x_input / 127.0) * graph_rect.width();
+                                    let screen_y = graph_rect.bottom() - (y_output / 127.0) * graph_rect.height();
+                                    
+                                    points.push(egui::pos2(screen_x, screen_y));
+                                }
+                            }
+                            
+                            // Копируем контрольные точки
+                            let control_copy = active_curve.control_points.clone();
+                            
+                            (points, control_copy)
+                        }; // Блокировка освобождена - теперь можно безопасно рисовать
                         
-                        if active_curve.control_points.len() >= 2 {
-                            let mut curve_points = Vec::new();
-                            for i in 0..=128 {
-                                let x_input = i as f32;
-                                let y_output = active_curve.evaluate(x_input);
-                                
-                                let screen_x = graph_rect.left() + (x_input / 127.0) * graph_rect.width();
-                                let screen_y = graph_rect.bottom() - (y_output / 127.0) * graph_rect.height();
-                                
-                                curve_points.push(egui::pos2(screen_x, screen_y));
-                            }
+                        // Отрисовка БЕЗ блокировок
+                        if curve_points.len() >= 2 {
+                            let curve_color = if active_tab_note_on {
+                                egui::Color32::from_rgb(100, 200, 255)
+                            } else {
+                                egui::Color32::from_rgb(255, 150, 100)
+                            };
                             
-                            if curve_points.len() >= 2 {
-                                let curve_color = if active_tab_note_on {
-                                    egui::Color32::from_rgb(100, 200, 255)
-                                } else {
-                                    egui::Color32::from_rgb(255, 150, 100)
-                                };
-                                
-                                painter.add(egui::Shape::line(
-                                    curve_points,
-                                    egui::Stroke::new(3.0, curve_color)
-                                ));
-                            }
+                            painter.add(egui::Shape::line(
+                                curve_points,
+                                egui::Stroke::new(3.0, curve_color)
+                            ));
+                        }
+                        
+                        // Контрольные точки
+                        for (i, point) in control_points_copy.iter().enumerate() {
+                            let screen_x = graph_rect.left() + (point.position.0 / 127.0) * graph_rect.width();
+                            let screen_y = graph_rect.bottom() - (point.position.1 / 127.0) * graph_rect.height();
+                            let screen_pos = egui::pos2(screen_x, screen_y);
                             
-                            // Контрольные точки
-                            for (i, point) in active_curve.control_points.iter().enumerate() {
-                                let screen_x = graph_rect.left() + (point.position.0 / 127.0) * graph_rect.width();
-                                let screen_y = graph_rect.bottom() - (point.position.1 / 127.0) * graph_rect.height();
-                                let screen_pos = egui::pos2(screen_x, screen_y);
-                                
-                                let color = if Some(i) == selected_point {
-                                    egui::Color32::from_rgb(255, 100, 100)
-                                } else {
-                                    egui::Color32::from_rgb(255, 150, 150)
-                                };
-                                
-                                painter.circle_filled(screen_pos, 6.0, color);
-                                painter.circle_stroke(screen_pos, 6.0, egui::Stroke::new(1.0, egui::Color32::BLACK));
-                            }
+                            let color = if Some(i) == selected_point {
+                                egui::Color32::from_rgb(255, 100, 100)
+                            } else {
+                                egui::Color32::from_rgb(255, 150, 150)
+                            };
+                            
+                            painter.circle_filled(screen_pos, 6.0, color);
+                            painter.circle_stroke(screen_pos, 6.0, egui::Stroke::new(1.0, egui::Color32::BLACK));
                         }
                         
                         ui.add_space(5.0);
                         
                         // Информация о выбранной точке
+                        // ИСПРАВЛЕНИЕ DEADLOCK: Получаем selected_point, затем блокируем curve
                         let selected_point = {
                             let state = gui_state.lock().unwrap();
                             state.selected_point
@@ -507,13 +533,25 @@ fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Edi
                         ui.group(|ui| {
                             ui.label("⚙️ MIDI Settings");
                             
-                            let mut hi_res_enabled = dual_curve_processor.lock().unwrap().is_hi_res_enabled();
+                            // Получаем текущее состояние без удержания блокировки
+                            let mut hi_res_enabled = {
+                                let curve = dual_curve_processor.lock().unwrap();
+                                curve.is_hi_res_enabled()
+                            };
                             
-                            if ui.checkbox(&mut hi_res_enabled, "Enable Hi-Res MIDI (14-bit)").clicked() {
-                                dual_curve_processor.lock().unwrap().set_hi_res_enabled(hi_res_enabled);
+                            // changed() срабатывает когда значение изменяется
+                            if ui.checkbox(&mut hi_res_enabled, "Enable Hi-Res MIDI (14-bit)").changed() {
+                                let mut curve = dual_curve_processor.lock().unwrap();
+                                curve.set_hi_res_enabled(hi_res_enabled);
                             }
                             
-                            if hi_res_enabled {
+                            // Используем актуальное значение из curve для отображения
+                            let current_hi_res = {
+                                let curve = dual_curve_processor.lock().unwrap();
+                                curve.is_hi_res_enabled()
+                            };
+                            
+                            if current_hi_res {
                                 ui.colored_label(egui::Color32::from_rgb(100, 200, 100), "✓ Hi-Res: 14-bit (0-16383)");
                                 ui.label("Format: CC#88 (LL) + NoteOn/Off (HH)");
                             } else {
@@ -535,9 +573,18 @@ fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Edi
                                 .show(ui, |ui| {
                                     for preset_name in preset_names {
                                         if ui.button(&preset_name).clicked() {
-                                            let mut curve = dual_curve_processor.lock().unwrap();
+                                            // Загружаем пресет только для активной кривой
                                             if let Some(preset) = preset_manager.lock().unwrap().get_preset(&preset_name) {
-                                                curve.load_from_preset(&preset);
+                                                let mut curve = dual_curve_processor.lock().unwrap();
+                                                let points = preset.to_control_points();
+                                                
+                                                if active_tab_note_on {
+                                                    curve.note_on_curve.control_points = points;
+                                                    curve.note_on_curve.dirty = true;
+                                                } else {
+                                                    curve.note_off_curve.control_points = points;
+                                                    curve.note_off_curve.dirty = true;
+                                                }
                                             }
                                         }
                                     }
@@ -596,6 +643,7 @@ fn process(
         _aux: &mut AuxiliaryBuffers,
         context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
+        // ОПТИМИЗАЦИЯ: Минимизируем время блокировки в аудио потоке
         // Обрабатываем MIDI события
         while let Some(event) = context.next_event() {
             match event {
@@ -608,14 +656,17 @@ fn process(
                 } => {
                     // Проверяем CC#88 для hi-res режима
                     if cc == 88 {
-                        let hi_res_enabled = self.dual_curve_processor.lock().unwrap().is_hi_res_enabled();
+                        let hi_res_enabled = {
+                            let curve = self.dual_curve_processor.lock().unwrap();
+                            curve.is_hi_res_enabled()
+                        }; // Сразу освобождаем блокировку
+                        
                         if hi_res_enabled {
                             // Hi-res включен - сохраняем CC#88 в буфер
                             let ll = (value * 127.0) as u8;
                             self.hi_res_buffer.lock().unwrap().store_cc88(channel, ll);
                         }
                         // В обоих случаях не отправляем CC#88 дальше
-                        // (в стандартном режиме просто игнорируем, в hi-res буферизуем)
                         continue;
                     }
                     // Остальные CC пропускаем без изменений
@@ -630,26 +681,27 @@ fn process(
                     velocity,
                     ..
                 } => {
-                    let mut curve = self.dual_curve_processor.lock().unwrap();
-                    let hi_res_enabled = curve.is_hi_res_enabled();
+                    // Минимизируем время блокировки - только на время обработки velocity
+                    let (hi_res_enabled, processed_velocity_or_14bit) = {
+                        let mut curve = self.dual_curve_processor.lock().unwrap();
+                        let hi_res = curve.is_hi_res_enabled();
+                        
+                        if hi_res {
+                            let lower_bits = self.hi_res_buffer.lock().unwrap().extract(channel);
+                            let ll = lower_bits.unwrap_or(0);
+                            let hh = (velocity * 127.0) as u8;
+                            let velocity_14bit = crate::curve::DualCurve::combine_14bit(ll, hh);
+                            let processed = curve.process_note_on_velocity_14bit(velocity_14bit);
+                            (true, processed)
+                        } else {
+                            let processed = curve.process_note_on_velocity((velocity * 127.0) as u8) as u16;
+                            (false, processed)
+                        }
+                    }; // Блокировка освобождена
                     
                     if hi_res_enabled {
-                        // Проверяем буфер на наличие CC#88
-                        let lower_bits = self.hi_res_buffer.lock().unwrap().extract(channel);
+                        let (new_ll, new_hh) = crate::curve::DualCurve::split_14bit(processed_velocity_or_14bit);
                         
-                        // В hi-res режиме ВСЕГДА обрабатываем как 14-бит
-                        // Если нет CC#88, используем LL=0
-                        let ll = lower_bits.unwrap_or(0);
-                        let hh = (velocity * 127.0) as u8;
-                        let velocity_14bit = crate::curve::DualCurve::combine_14bit(ll, hh);
-                        
-                        // Обрабатываем через 14-битную кривую
-                        let processed_14bit = curve.process_note_on_velocity_14bit(velocity_14bit);
-                        
-                        // Разделяем обратно на LL и HH
-                        let (new_ll, new_hh) = crate::curve::DualCurve::split_14bit(processed_14bit);
-                        
-                        // Отправляем CC#88
                         context.send_event(NoteEvent::MidiCC {
                             timing,
                             channel,
@@ -657,7 +709,6 @@ fn process(
                             value: new_ll as f32 / 127.0,
                         });
                         
-                        // Отправляем NoteOn
                         context.send_event(NoteEvent::NoteOn {
                             timing,
                             voice_id,
@@ -666,14 +717,12 @@ fn process(
                             velocity: new_hh as f32 / 127.0,
                         });
                     } else {
-                        // Hi-res выключен - обычная обработка
-                        let processed_velocity = curve.process_note_on_velocity((velocity * 127.0) as u8);
                         context.send_event(NoteEvent::NoteOn {
                             timing,
                             voice_id,
                             channel,
                             note,
-                            velocity: processed_velocity as f32 / 127.0,
+                            velocity: processed_velocity_or_14bit as u8 as f32 / 127.0,
                         });
                     }
                 }
@@ -686,26 +735,27 @@ fn process(
                     velocity,
                     ..
                 } => {
-                    let mut curve = self.dual_curve_processor.lock().unwrap();
-                    let hi_res_enabled = curve.is_hi_res_enabled();
+                    // Минимизируем время блокировки - только на время обработки velocity
+                    let (hi_res_enabled, processed_velocity_or_14bit) = {
+                        let mut curve = self.dual_curve_processor.lock().unwrap();
+                        let hi_res = curve.is_hi_res_enabled();
+                        
+                        if hi_res {
+                            let lower_bits = self.hi_res_buffer.lock().unwrap().extract(channel);
+                            let ll = lower_bits.unwrap_or(0);
+                            let hh = (velocity * 127.0) as u8;
+                            let velocity_14bit = crate::curve::DualCurve::combine_14bit(ll, hh);
+                            let processed = curve.process_note_off_velocity_14bit(velocity_14bit);
+                            (true, processed)
+                        } else {
+                            let processed = curve.process_note_off_velocity((velocity * 127.0) as u8) as u16;
+                            (false, processed)
+                        }
+                    }; // Блокировка освобождена
                     
                     if hi_res_enabled {
-                        // Проверяем буфер на наличие CC#88
-                        let lower_bits = self.hi_res_buffer.lock().unwrap().extract(channel);
+                        let (new_ll, new_hh) = crate::curve::DualCurve::split_14bit(processed_velocity_or_14bit);
                         
-                        // В hi-res режиме ВСЕГДА обрабатываем как 14-бит
-                        // Если нет CC#88, используем LL=0
-                        let ll = lower_bits.unwrap_or(0);
-                        let hh = (velocity * 127.0) as u8;
-                        let velocity_14bit = crate::curve::DualCurve::combine_14bit(ll, hh);
-                        
-                        // Обрабатываем через 14-битную кривую
-                        let processed_14bit = curve.process_note_off_velocity_14bit(velocity_14bit);
-                        
-                        // Разделяем обратно на LL и HH
-                        let (new_ll, new_hh) = crate::curve::DualCurve::split_14bit(processed_14bit);
-                        
-                        // Отправляем CC#88
                         context.send_event(NoteEvent::MidiCC {
                             timing,
                             channel,
@@ -713,7 +763,6 @@ fn process(
                             value: new_ll as f32 / 127.0,
                         });
                         
-                        // Отправляем NoteOff
                         context.send_event(NoteEvent::NoteOff {
                             timing,
                             voice_id,
@@ -722,14 +771,12 @@ fn process(
                             velocity: new_hh as f32 / 127.0,
                         });
                     } else {
-                        // Hi-res выключен - обычная обработка
-                        let processed_velocity = curve.process_note_off_velocity((velocity * 127.0) as u8);
                         context.send_event(NoteEvent::NoteOff {
                             timing,
                             voice_id,
                             channel,
                             note,
-                            velocity: processed_velocity as f32 / 127.0,
+                            velocity: processed_velocity_or_14bit as u8 as f32 / 127.0,
                         });
                     }
                 }
@@ -831,7 +878,13 @@ impl GuiController {
         ui.add_space(10.0);
         
         // Информация о выбранной точке
-        if let Some(index) = self.gui_state.lock().unwrap().selected_point {
+        // ИСПРАВЛЕНИЕ DEADLOCK: Сначала получаем selected_point, затем блокируем curve
+        let selected_point = {
+            let gui_state = self.gui_state.lock().unwrap();
+            gui_state.selected_point
+        };
+        
+        if let Some(index) = selected_point {
             let curve = self.dual_curve_processor.lock().unwrap();
             if let Some(point) = curve.note_on_curve.control_points.get(index) {
                 ui.label(format!(
@@ -858,17 +911,26 @@ impl GuiController {
             }
             
             if ui.button("❌ Удалить точку").clicked() {
-                if let Some(index) = self.gui_state.lock().unwrap().selected_point {
+                let index = {
+                    let gui_state = self.gui_state.lock().unwrap();
+                    gui_state.selected_point
+                };
+                
+                if let Some(index) = index {
                     let mut curve = self.dual_curve_processor.lock().unwrap();
                     curve.remove_note_on_point(index);
-                    self.gui_state.lock().unwrap().selected_point = None;
+                    
+                    let mut gui_state = self.gui_state.lock().unwrap();
+                    gui_state.selected_point = None;
                 }
             }
             
             if ui.button("🔄 Сброс к линейной").clicked() {
                 let mut curve = self.dual_curve_processor.lock().unwrap();
                 curve.reset_to_linear();
-                self.gui_state.lock().unwrap().selected_point = None;
+                
+                let mut gui_state = self.gui_state.lock().unwrap();
+                gui_state.selected_point = None;
             }
         });
     }
@@ -991,18 +1053,26 @@ impl GuiController {
     
     /// Обработка взаимодействий с кривой
     fn handle_curve_interaction(&self, response: &egui::Response) {
-        let mut gui_state = self.gui_state.lock().unwrap();
+        // ИСПРАВЛЕНИЕ DEADLOCK: Разделяем блокировки на отдельные операции
         
         // Клик для выбора точки
         if response.clicked() {
             if let Some(hover_pos) = response.hover_pos() {
-                gui_state.selected_point = self.find_point_at(hover_pos, response.rect);
+                let selected_point = self.find_point_at(hover_pos, response.rect);
+                let mut gui_state = self.gui_state.lock().unwrap();
+                gui_state.selected_point = selected_point;
             }
         }
         
         // Перетаскивание точки
         if response.dragged() {
-            if let Some(selected_index) = gui_state.selected_point {
+            // Сначала получаем selected_point
+            let selected_index = {
+                let gui_state = self.gui_state.lock().unwrap();
+                gui_state.selected_point
+            };
+            
+            if let Some(selected_index) = selected_index {
                 if let Some(hover_pos) = response.hover_pos() {
                     let world_pos = self.screen_to_world(hover_pos, response.rect);
                     let mut curve = self.dual_curve_processor.lock().unwrap();
@@ -1012,16 +1082,26 @@ impl GuiController {
         }
         
         // Отслеживание начала перетаскивания
-        if !gui_state.is_dragging && response.dragged() && gui_state.selected_point.is_some() {
-            gui_state.is_dragging = true;
+        if response.dragged() {
+            let mut gui_state = self.gui_state.lock().unwrap();
+            if !gui_state.is_dragging && gui_state.selected_point.is_some() {
+                gui_state.is_dragging = true;
+            }
         }
         
         // Сохранение настроек при отпускании кнопки мыши (drag release)
-        if response.drag_stopped() && gui_state.is_dragging {
-            // Мышь отпущена - обновляем настройки в памяти (без сохранения на диск в VST3)
-            gui_state.is_dragging = false;
-            // Автосохранение в VST3 отключено - настройки хранятся только в памяти
-            let _ = self.auto_save_settings(); // Игнорируем результат, т.к. в VST3 это no-op
+        if response.drag_stopped() {
+            let should_save = {
+                let mut gui_state = self.gui_state.lock().unwrap();
+                let was_dragging = gui_state.is_dragging;
+                gui_state.is_dragging = false;
+                was_dragging
+            };
+            
+            if should_save {
+                // Автосохранение в VST3 отключено - настройки хранятся только в памяти
+                let _ = self.auto_save_settings(); // Игнорируем результат, т.к. в VST3 это no-op
+            }
         }
         
         // Двойной клик для добавления точки
@@ -1038,6 +1118,12 @@ impl GuiController {
     fn draw_bezier_curve(&self, painter: &egui::Painter, rect: egui::Rect) {
         // Отрисовка сетки
         self.draw_grid(painter, rect);
+        
+        // ИСПРАВЛЕНИЕ DEADLOCK: Сначала получаем selected_point, затем работаем с curve
+        let selected_point = {
+            let gui_state = self.gui_state.lock().unwrap();
+            gui_state.selected_point
+        };
         
         let mut curve = self.dual_curve_processor.lock().unwrap();
         if curve.note_on_curve.control_points.len() < 2 {
@@ -1065,14 +1151,13 @@ impl GuiController {
         }
         
         // Рисуем контрольные точки
-        let gui_state = self.gui_state.lock().unwrap();
         for (i, point) in curve.note_on_curve.control_points.iter().enumerate() {
             let screen_pos = self.world_to_screen(
                 egui::pos2(point.position.0, point.position.1),
                 rect
             );
             
-            let color = if Some(i) == gui_state.selected_point {
+            let color = if Some(i) == selected_point {
                 egui::Color32::from_rgb(255, 100, 100)
             } else {
                 egui::Color32::from_rgb(255, 150, 150)
