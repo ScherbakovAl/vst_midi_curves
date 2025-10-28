@@ -1,4 +1,8 @@
-/// Основная структура для работы с кривыми Безье
+//! Основная структура для работы с кривыми Безье
+//!
+//! Copyright (c) 2025 Scherbakov Alexey <scherbakov.al@gmail.com>
+//! Licensed under the MIT License
+
 use crate::curve::{ControlPoint, cubic_bezier};
 
 #[derive(Debug, Clone)]

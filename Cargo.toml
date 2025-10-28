@@ -2,7 +2,7 @@
 name = "vst_midi_curves"
 version = "0.1.0"
 edition = "2021"
-authors = ["Your Name <your.email@example.com>"]
+authors = ["Scherbakov Alexey <scherbakov.al@gmail.com>"]
 description = "VST3 plugin for MIDI velocity processing with customizable Bezier curves"
 license = "MIT"
 repository = "https://github.com/yourusername/vst_midi_curves"

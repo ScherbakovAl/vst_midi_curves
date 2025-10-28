@@ -1,5 +1,8 @@
 //! Simplified MIDI support for basic testing
 //!
+//! Copyright (c) 2025 Scherbakov Alexey <scherbakov.al@gmail.com>
+//! Licensed under the MIT License
+//!
 //! This is a temporary simplified version for checking basic MIDI functionality
 //! without complex dependencies and error handling.
 //!

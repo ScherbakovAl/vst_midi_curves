@@ -1,5 +1,8 @@
-/// Module for working with curve presets
-/// Provides saving, loading and management of user presets
+//! Module for working with curve presets
+//! Provides saving, loading and management of user presets
+//!
+//! Copyright (c) 2025 Scherbakov Alexey <scherbakov.al@gmail.com>
+//! Licensed under the MIT License
 
 use serde::{Deserialize, Serialize};
 use std::fs;

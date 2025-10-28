@@ -1,5 +1,8 @@
 //! MIDI Curves - Standalone application for processing MIDI velocity with customizable curves
 //!
+//! Copyright (c) 2025 Scherbakov Alexey <scherbakov.al@gmail.com>
+//! Licensed under the MIT License
+//!
 //! Now supports separate curves for NoteOn and NoteOff events.
 //! Uses DualCurve structure to manage two curves simultaneously.
 //! Includes settings save and load system for each platform.

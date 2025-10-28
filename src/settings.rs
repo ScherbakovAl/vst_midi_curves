@@ -1,5 +1,8 @@
-/// Module for saving and loading application settings
-/// Supports cross-platform settings storage for Windows, macOS, Linux
+//! Module for saving and loading application settings
+//! Supports cross-platform settings storage for Windows, macOS, Linux
+//!
+//! Copyright (c) 2025 Scherbakov Alexey <scherbakov.al@gmail.com>
+//! Licensed under the MIT License
 
 use serde::{Deserialize, Serialize};
 use std::fs;

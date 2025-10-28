@@ -1,4 +1,8 @@
-/// Модуль для работы с кривыми Безье и обработкой MIDI velocity
+//! Модуль для работы с кривыми Безье и обработкой MIDI velocity
+//!
+//! Copyright (c) 2025 Scherbakov Alexey <scherbakov.al@gmail.com>
+//! Licensed under the MIT License
+
 pub mod bezier;
 pub mod interpolation;
 pub mod control_point;

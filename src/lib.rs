@@ -1,6 +1,7 @@
-#![doc = "MIDI Curves VST3 Plugin"]
-
 //! MIDI Curves VST3 Plugin
+//!
+//! Copyright (c) 2025 Scherbakov Alexey <scherbakov.al@gmail.com>
+//! Licensed under the MIT License
 //!
 //! VST3 plugin for MIDI velocity processing with customizable Bezier curves
 //! Includes settings save/load system
@@ -181,9 +182,9 @@ impl Default for MidiCurvesPlugin {
 
 impl Plugin for MidiCurvesPlugin {
     const NAME: &'static str = "MIDI Curves";
-    const VENDOR: &'static str = "Rust VST Developer";
+    const VENDOR: &'static str = "Scherbakov Alexey";
     const URL: &'static str = "https://github.com/vst-midi-curves";
-    const EMAIL: &'static str = "developer@vst-plugins.org";
+    const EMAIL: &'static str = "scherbakov.al@gmail.com";
     const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 
     // MIDI-only plugin with minimal stereo layout for Reaper compatibility

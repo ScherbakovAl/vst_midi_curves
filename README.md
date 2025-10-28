@@ -1,5 +1,9 @@
 # 🎵 VST3 MIDI Curves - Build and Usage
 
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
 ## 📋 What was created
 
 ✅ **VST3 plugin** - Full-featured plugin based on NIH-plug  
