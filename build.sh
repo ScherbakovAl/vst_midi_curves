@@ -119,3 +119,8 @@ echo "📝 Для установки:"
 echo "- Linux: скопировать MidiCurves.vst3 в ~/.vst3/"
 echo "- macOS: скопировать MidiCurves.vst3 в ~/Library/Audio/Plug-Ins/VST3/"
 echo "- Для Reaper: поместить в папку VST3, указанную в настройках"
+
+## for test
+rm -rf /home/sche/.vst3/MidiCurves.vst3
+cp -rf /home/sche/programming/vst_midi_curves/build/midi_curves_v0.1.0/MidiCurves.vst3 /home/sche/.vst3/
+flatpak run fm.reaper.Reaper
