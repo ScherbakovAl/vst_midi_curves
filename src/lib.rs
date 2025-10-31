@@ -61,7 +61,8 @@ impl VstHiResBuffer {
     }
     
     /// Extracts buffered value if available, channel matches and timeout hasn't expired
-    /// IMPORTANT: Identical to standalone version with 100ms timeout check
+    /// IMPORTANT: Same CC#88 can be used for BOTH NoteOn AND NoteOff events
+    /// Buffer is NOT cleared after extract - only after timeout or new CC#88
     fn extract(&mut self, channel: u8) -> Option<u8> {
         if let (Some(buffered_channel), Some(lower)) = (self.channel, self.lower_bits) {
             // Check that channel matches
@@ -69,8 +70,8 @@ impl VstHiResBuffer {
                 // Check timeout (100ms) - as in standalone
                 if let Some(ts) = self.timestamp {
                     if ts.elapsed().as_millis() < 100 {
-                        // Clear buffer and return value
-                        self.clear();
+                        // Return value but DO NOT clear buffer yet
+                        // Allow reuse for subsequent events (NoteOn -> NoteOff)
                         return Some(lower);
                     }
                 }
@@ -789,9 +790,19 @@ fn process(
                             let lower_bits = self.hi_res_buffer.lock().unwrap().extract(channel);
                             let ll = lower_bits.unwrap_or(0);
                             let hh = (velocity * 127.0) as u8;
-                            let velocity_14bit = crate::curve::DualCurve::combine_14bit(ll, hh);
-                            let processed = curve.process_note_off_velocity_14bit(velocity_14bit);
-                            (true, processed)
+                            
+                            // Process LL and HH separately through NoteOff curve
+                            let processed_ll = curve.process_note_off_velocity(ll) as u8;
+                            let processed_hh = curve.process_note_off_velocity(hh) as u8;
+                            
+                            // Debug output for NoteOff processing
+                            eprintln!("VST3 NoteOff: Hi-Res ON, Original LL={}, Original HH={}, Processed LL={}, Processed HH={}",
+                                     ll, hh, processed_ll, processed_hh);
+                            
+                            // Combine back to 14-bit
+                            let velocity_14bit = crate::curve::DualCurve::combine_14bit(processed_ll, processed_hh);
+                            
+                            (true, velocity_14bit)
                         } else {
                             let processed = curve.process_note_off_velocity((velocity * 127.0) as u8) as u16;
                             (false, processed)
@@ -800,6 +811,9 @@ fn process(
                     
                     if hi_res_enabled {
                         let (new_ll, new_hh) = crate::curve::DualCurve::split_14bit(processed_velocity_or_14bit);
+                        
+                        // Debug: check what we're sending
+                        eprintln!("VST3 NoteOff: Sending CC#88={}, NoteOff velocity={}", new_ll, new_hh);
                         
                         context.send_event(NoteEvent::MidiCC {
                             timing,
