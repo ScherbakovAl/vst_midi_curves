@@ -1,5 +1,9 @@
 # 🎵 VST3 MIDI Curves - Build and Usage
 
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
 ## 📋 What was created
 
 ✅ **VST3 plugin** - Full-featured plugin based on NIH-plug  
@@ -7,6 +11,12 @@
 ✅ **Cross-platform build** - Windows, macOS, Linux  
 ✅ **Automatic build scripts** - One command for any platform  
 ✅ **Detailed documentation** - BUILD_GUIDE.md with instructions  
+
+
+## 🎥 Video Demo
+
+- **YouTube**: [VST3 MIDI Curves Plugin Demo](https://www.youtube.com/watch?v=CtjtueLHJKM)
+
 
 ## 🚀 Quick Start
 
@@ -144,6 +154,7 @@ sudo apt install libgtk-4-dev libssl-dev libasound2-dev libudev-dev
 - **BUILD_GUIDE.md** - Detailed build instructions
 - **ARCHITECTURE.md** - Project architecture
 - **Cargo.toml** - Configuration and dependencies
+
 
 ## 🎯 Result
 
