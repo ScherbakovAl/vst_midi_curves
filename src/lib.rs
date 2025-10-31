@@ -198,8 +198,9 @@ impl Plugin for MidiCurvesPlugin {
     ];
 
     // Configure MIDI configuration
-    const MIDI_INPUT: MidiConfig = MidiConfig::Basic;
-    const MIDI_OUTPUT: MidiConfig = MidiConfig::Basic;
+    // MidiCCs required for hi-res MIDI support (CC#88 messages)
+    const MIDI_INPUT: MidiConfig = MidiConfig::MidiCCs;
+    const MIDI_OUTPUT: MidiConfig = MidiConfig::MidiCCs;
     
     const SAMPLE_ACCURATE_AUTOMATION: bool = true;
 

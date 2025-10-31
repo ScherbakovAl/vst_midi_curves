@@ -1,4 +1,5 @@
-# 🎵 VST3 MIDI Curves - Build and Usage
+EADME.md</path>
+<content"># 🎵 VST3 MIDI Curves - Build and Usage
 
 ## 📄 License
 
