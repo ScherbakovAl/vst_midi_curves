@@ -121,7 +121,8 @@ echo "- macOS: copy MidiCurves.vst3 to ~/Library/Audio/Plug-Ins/VST3/"
 echo "- For Reaper: place in VST3 folder specified in settings"
 
 ## for test
+rm /home/sche/Documents/programming/stm32_piano/vst_midi_curves/build/midi_curves_v0.1.0/midi_curves
+cp /home/sche/Documents/programming/stm32_piano/vst_midi_curves/target/release/midi_curves /home/sche/Documents/programming/stm32_piano/vst_midi_curves/build/midi_curves_v0.1.0/
 rm -rf /home/sche/.vst3/MidiCurves.vst3
 cp -rf /home/sche/Documents/programming/stm32_piano/vst_midi_curves/build/midi_curves_v0.1.0/MidiCurves.vst3 /home/sche/.vst3/
 flatpak run fm.reaper.Reaper
-# р
