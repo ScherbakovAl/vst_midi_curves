@@ -122,6 +122,6 @@ echo "- For Reaper: place in VST3 folder specified in settings"
 
 ## for test
 rm -rf /home/sche/.vst3/MidiCurves.vst3
-cp -rf /home/sche/programming/vst_midi_curves/build/midi_curves_v0.1.0/MidiCurves.vst3 /home/sche/.vst3/
+cp -rf /home/sche/Documents/programming/stm32_piano/vst_midi_curves/build/midi_curves_v0.1.0/MidiCurves.vst3 /home/sche/.vst3/
 flatpak run fm.reaper.Reaper
-р
+# р
