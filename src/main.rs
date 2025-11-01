@@ -1201,10 +1201,20 @@ fn draw_presets_panel(&mut self, ui: &mut egui::Ui) {
     }
     
     fn handle_curve_interaction(&mut self, response: &Response) {
+        // Calculate graph area with margins (like VST3 version)
+        let margin = 20.0;
+        let graph_rect = egui::Rect::from_min_size(
+            egui::pos2(response.rect.left() + margin, response.rect.top() + margin),
+            egui::vec2(
+                response.rect.width() - margin * 2.0,
+                response.rect.height() - margin * 2.0
+            )
+        );
+        
         // Click to select point
         if response.clicked() {
             if let Some(hover_pos) = response.hover_pos() {
-                self.selected_point = self.find_point_at(hover_pos, response.rect);
+                self.selected_point = self.find_point_at(hover_pos, graph_rect);
             }
         }
         
@@ -1212,7 +1222,7 @@ fn draw_presets_panel(&mut self, ui: &mut egui::Ui) {
         if response.dragged() {
             if self.selected_point.is_some() {
                 if let Some(hover_pos) = response.hover_pos() {
-                    self.update_selected_point(hover_pos, response.rect);
+                    self.update_selected_point(hover_pos, graph_rect);
                 }
             }
         }
@@ -1235,14 +1245,14 @@ fn draw_presets_panel(&mut self, ui: &mut egui::Ui) {
         // Double click to add point
         if response.double_clicked() {
             if let Some(hover_pos) = response.hover_pos() {
-                self.add_control_point(hover_pos, response.rect);
+                self.add_control_point(hover_pos, graph_rect);
             }
         }
         
         // Right click to delete point
         if response.secondary_clicked() {
             if let Some(hover_pos) = response.hover_pos() {
-                if let Some(point_idx) = self.find_point_at(hover_pos, response.rect) {
+                if let Some(point_idx) = self.find_point_at(hover_pos, graph_rect) {
                     self.selected_point = Some(point_idx);
                     self.remove_selected_point();
                 }
@@ -1261,20 +1271,30 @@ fn draw_presets_panel(&mut self, ui: &mut egui::Ui) {
     fn draw_grid(&self, painter: &Painter, rect: Rect) {
         let grid_color = Color32::from_gray(40);
         
+        // Calculate graph area with margins (like VST3 version)
+        let margin = 20.0;
+        let graph_rect = egui::Rect::from_min_size(
+            egui::pos2(rect.left() + margin, rect.top() + margin),
+            egui::vec2(
+                rect.width() - margin * 2.0,
+                rect.height() - margin * 2.0
+            )
+        );
+        
         // Vertical lines
         for i in 0..=10 {
-            let x = rect.left() + rect.width() * i as f32 / 10.0;
+            let x = graph_rect.left() + graph_rect.width() * i as f32 / 10.0;
             painter.line_segment(
-                [Pos2::new(x, rect.top()), Pos2::new(x, rect.bottom())],
+                [Pos2::new(x, graph_rect.top()), Pos2::new(x, graph_rect.bottom())],
                 Stroke::new(1.0, grid_color),
             );
         }
         
         // Horizontal lines
         for i in 0..=10 {
-            let y = rect.top() + rect.height() * i as f32 / 10.0;
+            let y = graph_rect.top() + graph_rect.height() * i as f32 / 10.0;
             painter.line_segment(
-                [Pos2::new(rect.left(), y), Pos2::new(rect.right(), y)],
+                [Pos2::new(graph_rect.left(), y), Pos2::new(graph_rect.right(), y)],
                 Stroke::new(1.0, grid_color),
             );
         }
@@ -1282,11 +1302,11 @@ fn draw_presets_panel(&mut self, ui: &mut egui::Ui) {
         // Axes
         let axis_color = Color32::from_gray(100);
         painter.line_segment(
-            [Pos2::new(rect.left(), rect.bottom()), Pos2::new(rect.right(), rect.bottom())],
+            [Pos2::new(graph_rect.left(), graph_rect.bottom()), Pos2::new(graph_rect.right(), graph_rect.bottom())],
             Stroke::new(2.0, axis_color),
         );
         painter.line_segment(
-            [Pos2::new(rect.left(), rect.top()), Pos2::new(rect.left(), rect.bottom())],
+            [Pos2::new(graph_rect.left(), graph_rect.top()), Pos2::new(graph_rect.left(), graph_rect.bottom())],
             Stroke::new(2.0, axis_color),
         );
     }
@@ -1304,6 +1324,16 @@ fn draw_bezier_curve(&mut self, painter: &Painter, rect: Rect) {
             return;
         }
         
+        // Calculate graph area with margins (like VST3 version)
+        let margin = 20.0;
+        let graph_rect = egui::Rect::from_min_size(
+            egui::pos2(rect.left() + margin, rect.top() + margin),
+            egui::vec2(
+                rect.width() - margin * 2.0,
+                rect.height() - margin * 2.0
+            )
+        );
+        
         // Build curve points through interpolation
         let mut curve_points = Vec::new();
         
@@ -1312,9 +1342,9 @@ fn draw_bezier_curve(&mut self, painter: &Painter, rect: Rect) {
             let x_input = i as f32;
             let y_output = curve.evaluate(x_input);
             
-            // Convert to screen coordinates
-            let screen_x = rect.left() + (x_input / 127.0) * rect.width();
-            let screen_y = rect.bottom() - (y_output / 127.0) * rect.height();
+            // Convert to screen coordinates using graph_rect with margins
+            let screen_x = graph_rect.left() + (x_input / 127.0) * graph_rect.width();
+            let screen_y = graph_rect.bottom() - (y_output / 127.0) * graph_rect.height();
             
             curve_points.push(Pos2::new(screen_x, screen_y));
         }
@@ -1335,7 +1365,8 @@ fn draw_bezier_curve(&mut self, painter: &Painter, rect: Rect) {
         
         // Draw control points as control elements
         for (i, point) in curve.control_points.iter().enumerate() {
-            let screen_pos = self.world_to_screen(Pos2::new(point.position.0, point.position.1), rect);
+            // Use graph_rect with margins for point positioning (like VST3 version)
+            let screen_pos = self.world_to_screen(Pos2::new(point.position.0, point.position.1), graph_rect);
             
             // Point color depends on selection and curve type
             let (color, stroke_color) = if Some(i) == self.selected_point {
