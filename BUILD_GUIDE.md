@@ -166,7 +166,8 @@ sudo apt install pkg-config libgtk-4-dev build-essential curl wget git
 
 **Fedora:**
 ```bash
-sudo dnf install pkg-config gtk4-devel gcc gcc-c++ curl wget git
+sudo dnf install pkg-config gtk4-devel gcc gcc-c++ curl wget git \
+    jack-audio-connection-kit-devel mesa-libGL-devel mesa-libGLU-devel alsa-lib-devel
 ```
 
 **Arch Linux:**
@@ -244,8 +245,11 @@ cargo build --release
 
 #### 3. Linking errors on Linux
 ```bash
-# Install additional libraries
+# Ubuntu/Debian additional libraries
 sudo apt install libssl-dev libasound2-dev libudev-dev libcairo2-dev libgdk-pixbuf2.0-dev
+
+# Fedora additional libraries (JACK, OpenGL, ALSA)
+sudo dnf install jack-audio-connection-kit-devel mesa-libGL-devel mesa-libGLU-devel alsa-lib-devel
 ```
 
 ### Specific Issues
