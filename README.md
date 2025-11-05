@@ -88,7 +88,7 @@ vst_midi_curves/
 ### Linux:
 - GTK4 development headers:
   - Ubuntu/Debian: `sudo apt install libgtk-4-dev pkg-config`
-  - Fedora: `sudo dnf install gtk4-devel pkg-config`
+  - Fedora: `sudo dnf install gtk4-devel pkg-config jack-audio-connection-kit-devel mesa-libGL-devel mesa-libGLU-devel alsa-lib-devel`
   - Arch: `sudo pacman -S gtk4 pkg-config`
 
 ## 📦 Build Commands
