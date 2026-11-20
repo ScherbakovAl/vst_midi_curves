@@ -286,6 +286,9 @@ impl ClapPlugin for MidiCurvesPlugin {
     const CLAP_FEATURES: &'static [ClapFeature] = &[ClapFeature::NoteEffect, ClapFeature::Utility];
 }
 
+// Единственное предупреждение сборки — «trailing semicolon in macro» из
+// макроса vst3_com внутри nih_export_vst3! (nih-plug 28b149e); allow его не
+// гасит (future-incompat lint из чужого макроса).
 nih_export_vst3!(MidiCurvesPlugin);
 nih_export_clap!(MidiCurvesPlugin);
 

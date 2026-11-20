@@ -1,128 +1,52 @@
 #!/bin/bash
-
-# Build Script for VST3 MIDI Curves
-# Automated build script for Linux, macOS and Windows
+# Сборка MIDI Curves: VST3 + CLAP + standalone в build/midi_curves_v<версия>/.
+# Linux — здесь; macOS — делегируется в build_macos.sh (universal binary).
+#
+#   ./build.sh            собрать
+#   ./build.sh --install  собрать, поставить в ~/.vst3 и ~/.clap и запустить
+#                         Reaper (flatpak) — для проверки
 
 set -e
+cd "$(dirname "$0")"
 
-echo "🎵 VST3 MIDI Curves - Build Script"
-echo "=================================="
-
-# Checking platform
+VERSION=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+OUT="build/midi_curves_v$VERSION"
 PLATFORM=$(uname -s)
-echo "🔍 Platform detected: $PLATFORM"
 
-case $PLATFORM in
-    "Linux")
-        echo "🐧 Building for Linux..."
-        cargo build --release --lib
-        echo "✅ Linux build completed!"
-        ;;
-    "Darwin")
-        echo "🍎 Building for macOS..."
-                
-                # Building VST3 library only
-                cargo build --release --lib
-                
-                echo "✅ macOS build completed!"
-        ;;
-    *)
-        echo "⚠️  Unsupported platform: $PLATFORM"
-        echo "💡 Supported platforms: Linux, macOS, Windows"
-        exit 1
-        ;;
-esac
+echo "🎵 MIDI Curves $VERSION — $PLATFORM"
 
-echo ""
-echo "📦 Creating distribution..."
+if [ "$PLATFORM" = "Darwin" ]; then
+    exec ./build_macos.sh "$@"
+fi
+if [ "$PLATFORM" != "Linux" ]; then
+    echo "⚠️  Unsupported platform: $PLATFORM (Windows: build_windows.sh)"
+    exit 1
+fi
 
-# Creating build directory
-mkdir -p build/midi_curves_v0.1.0
+cargo build --release --locked --lib --bin midi_curves
 
-case $PLATFORM in
-    "Linux")
-        # Linux build - VST3 plugin only
-        
-        # Creating proper VST3 plugin structure
-        mkdir -p build/midi_curves_v0.1.0/MidiCurves.vst3/Contents/x86_64-linux
-        
-        # Checking for VST3 plugin presence
-        VST3_PLUGIN="target/release/deps/libvst_midi_curves.so"
-        if [ -f "$VST3_PLUGIN" ]; then
-            cp "$VST3_PLUGIN" build/midi_curves_v0.1.0/MidiCurves.vst3/Contents/x86_64-linux/MidiCurves.so
-            echo "✅ VST3 plugin copied"
-        else
-            echo "❌ VST3 plugin not found: $VST3_PLUGIN"
-            exit 1
-        fi
-        
-        # Copying Info.plist for Linux
-        if [ -f "Info.plist.linux" ]; then
-            cp Info.plist.linux build/midi_curves_v0.1.0/MidiCurves.vst3/Contents/Info.plist
-        else
-            echo "❌ Info.plist.linux not found"
-            exit 1
-        fi
-        
-        # Creating directory for resources
-        mkdir -p build/midi_curves_v0.1.0/MidiCurves.vst3/Contents/Resources
-        
-        cp README.md build/midi_curves_v0.1.0/ 2>/dev/null || echo "📄 README.md not found"
-        cp BUILD_GUIDE.md build/midi_curves_v0.1.0/ 2>/dev/null || echo "📄 BUILD_GUIDE.md not found"
-        
-        echo "🐧 Linux distribution created: build/midi_curves_v0.1.0/"
-        echo "📝 VST3 plugin created as MidiCurves.vst3/"
-        ;;
-    "Darwin")
-        # macOS build - VST3 plugin only
-        
-        # Creating proper VST3 plugin structure for macOS
-        mkdir -p build/midi_curves_v0.1.0/MidiCurves.vst3/Contents/x86_64-darwin
-        mkdir -p build/midi_curves_v0.1.0/MidiCurves.vst3/Contents/aarch64-darwin
-        mkdir -p build/midi_curves_v0.1.0/MidiCurves.vst3/Contents/Resources
-        
-        # For simplicity, copying same files for both architectures
-        VST3_PLUGIN="target/release/deps/libvst_midi_curves.dylib"
-        if [ -f "$VST3_PLUGIN" ]; then
-            cp "$VST3_PLUGIN" build/midi_curves_v0.1.0/MidiCurves.vst3/Contents/x86_64-darwin/MidiCurves
-            cp "$VST3_PLUGIN" build/midi_curves_v0.1.0/MidiCurves.vst3/Contents/aarch64-darwin/MidiCurves
-            echo "✅ VST3 plugin copied for macOS"
-        else
-            echo "❌ VST3 plugin not found for macOS"
-            exit 1
-        fi
-        
-        # Copying Info.plist for macOS
-        if [ -f "Info.plist.linux" ]; then
-            cp Info.plist.linux build/midi_curves_v0.1.0/MidiCurves.vst3/Contents/Info.plist
-        else
-            echo "❌ Info.plist.linux not found"
-            exit 1
-        fi
-        
-        cp README.md build/midi_curves_v0.1.0/ 2>/dev/null || echo "📄 README.md not found"
-        cp BUILD_GUIDE.md build/midi_curves_v0.1.0/ 2>/dev/null || echo "📄 BUILD_GUIDE.md not found"
-        
-        echo "🍎 macOS distribution created: build/midi_curves_v0.1.0/"
-        ;;
-esac
+LIB="target/release/libvst_midi_curves.so"
+rm -rf "$OUT/MidiCurves.vst3" "$OUT/MidiCurves.clap"
+mkdir -p "$OUT/MidiCurves.vst3/Contents/x86_64-linux"
+# VST3: бандл-папка; CLAP: та же .so с расширением .clap.
+cp "$LIB" "$OUT/MidiCurves.vst3/Contents/x86_64-linux/MidiCurves.so"
+cp Info.plist.linux "$OUT/MidiCurves.vst3/Contents/Info.plist"
+cp "$LIB" "$OUT/MidiCurves.clap"
+cp target/release/midi_curves "$OUT/"
+cp README.md BUILD_GUIDE.md LICENSE "$OUT/"
 
-echo ""
-echo "📋 Build information:"
-echo "- VST3 plugin: $(ls -d build/midi_curves_v0.1.0/*.vst3 2>/dev/null || echo "not found")"
+echo "✅ $OUT/"
+ls -1 "$OUT"
 
-echo ""
-echo "🎉 Build completed successfully!"
-echo "📁 Distribution located at: build/midi_curves_v0.1.0/"
-echo ""
-echo "📝 For installation:"
-echo "- Linux: copy MidiCurves.vst3 to ~/.vst3/"
-echo "- macOS: copy MidiCurves.vst3 to ~/Library/Audio/Plug-Ins/VST3/"
-echo "- For Reaper: place in VST3 folder specified in settings"
-
-## for test
-rm /home/sche/Documents/programming/stm32_piano/vst_midi_curves/build/midi_curves_v0.1.0/midi_curves
-cp /home/sche/Documents/programming/stm32_piano/vst_midi_curves/target/release/midi_curves /home/sche/Documents/programming/stm32_piano/vst_midi_curves/build/midi_curves_v0.1.0/
-rm -rf /home/sche/.vst3/MidiCurves.vst3
-cp -rf /home/sche/Documents/programming/stm32_piano/vst_midi_curves/build/midi_curves_v0.1.0/MidiCurves.vst3 /home/sche/.vst3/
-flatpak run fm.reaper.Reaper
+if [ "$1" = "--install" ]; then
+    mkdir -p ~/.vst3 ~/.clap
+    rm -rf ~/.vst3/MidiCurves.vst3
+    cp -r "$OUT/MidiCurves.vst3" ~/.vst3/
+    cp "$OUT/MidiCurves.clap" ~/.clap/
+    echo "📦 Installed: ~/.vst3/MidiCurves.vst3, ~/.clap/MidiCurves.clap"
+    flatpak run fm.reaper.Reaper
+else
+    echo ""
+    echo "Install: copy MidiCurves.vst3 to ~/.vst3/ and/or MidiCurves.clap to ~/.clap/"
+    echo "         (or ./build.sh --install)"
+fi

@@ -1,46 +1,32 @@
 #!/bin/bash
-# Build script for Windows (x86_64)
-# Requires installed Rust and cross for cross-compilation
+# Сборка для Windows (x86_64): на Windows (Git Bash/MSYS) — обычный cargo,
+# на Linux — кросс-сборка через cross (нужен Docker/Podman).
 
 set -e
+cd "$(dirname "$0")"
 
-echo "🔨 Starting VST3 plugin build for Windows..."
-
-# Check for Rust presence
-if ! command -v cargo &> /dev/null; then
-    echo "❌ Rust is not installed! Install from https://rustup.rs/"
-    exit 1
+TARGET=x86_64-pc-windows-msvc
+if [ "$OS" = "Windows_NT" ]; then
+    CARGO=cargo
+else
+    TARGET=x86_64-pc-windows-gnu
+    command -v cross &> /dev/null || cargo install cross
+    CARGO=cross
 fi
 
-# Install cross if it's not available
-if ! command -v cross &> /dev/null; then
-    echo "📦 Installing cross for cross-compilation..."
-    cargo install cross
-fi
+$CARGO build --release --locked --target "$TARGET" --lib --bin midi_curves
 
-echo "🏗️ Building VST3 plugin..."
-cross build --release --target x86_64-pc-windows-msvc
+VERSION=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+OUT="build/midi_curves_v${VERSION}_windows"
+REL="target/$TARGET/release"
+rm -rf "$OUT/MidiCurves.vst3" "$OUT/MidiCurves.clap"
+mkdir -p "$OUT/MidiCurves.vst3/Contents/x86_64-win"
+# VST3: бандл-папка с .vst3 внутри; CLAP: та же dll с расширением .clap.
+cp "$REL/vst_midi_curves.dll" "$OUT/MidiCurves.vst3/Contents/x86_64-win/MidiCurves.vst3"
+cp "$REL/vst_midi_curves.dll" "$OUT/MidiCurves.clap"
+cp "$REL/midi_curves.exe" "$OUT/"
+cp README.md BUILD_GUIDE.md LICENSE "$OUT/"
 
-echo "📁 Creating VST3 structure..."
-mkdir -p "target/x86_64-pc-windows-msvc/release/vst3"
-cp "target/x86_64-pc-windows-msvc/release/midi_curves_vst3.dll" "target/x86_64-pc-windows-msvc/release/vst3/MidiCurves.vst3"
-
-echo "📦 Creating standalone application..."
-cross build --release --target x86_64-pc-windows-msvc --bin midi_curves
-cp "target/x86_64-pc-windows-msvc/release/midi_curves.exe" "target/x86_64-pc-windows-msvc/release/"
-
-echo "✅ Build completed!"
-echo "📂 Files are located in:"
-echo "   - VST3: target/x86_64-pc-windows-msvc/release/vst3/MidiCurves.vst3"
-echo "   - Standalone: target/x86_64-pc-windows-msvc/release/midi_curves.exe"
-
-# Installation instructions
-echo ""
-echo "📋 Installation instructions:"
-echo "VST3:"
-echo "   1. Copy the MidiCurves.vst3 folder to"
-echo "      C:\\Program Files\\Common Files\\VST3\\"
-echo ""
-echo "Standalone:"
-echo "   1. Copy midi_curves.exe to desired folder"
-echo "   2. Launch the application"
+echo "✅ $OUT/"
+echo "Install: MidiCurves.vst3 → C:\\Program Files\\Common Files\\VST3\\"
+echo "         MidiCurves.clap → C:\\Program Files\\Common Files\\CLAP\\"

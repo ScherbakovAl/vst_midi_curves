@@ -13,19 +13,13 @@ pub use shape::{CurveShape, Knot};
 
 /// Обе кривые и формат выхода — то, что хранится в проекте DAW (плагин) и в
 /// `settings.json` (standalone).
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct CurveSet {
     pub note_on: CurveShape,
     pub note_off: CurveShape,
     /// Формат выхода: true — 14 бит (CC88 + нота), false — 7 бит.
     pub hi_res: bool,
-}
-
-impl Default for CurveSet {
-    fn default() -> Self {
-        Self { note_on: CurveShape::linear(), note_off: CurveShape::linear(), hi_res: false }
-    }
 }
 
 impl CurveSet {

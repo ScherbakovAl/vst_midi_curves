@@ -140,7 +140,7 @@ fn writer_reader_stress() {
                 for slot in Slot::ALL {
                     bank.store(slot, &shapes[n % 2]);
                 }
-                bank.set_hi_res(n % 3 != 0);
+                bank.set_hi_res(!n.is_multiple_of(3));
                 n += 1;
             }
             n

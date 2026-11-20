@@ -1,171 +1,87 @@
-# 🎵 VST3 MIDI Curves - Build and Usage
+# MIDI Curves
 
-## 📄 License
+MIDI velocity curves as a **VST3/CLAP plugin** and a **standalone app** (Rust,
+[nih-plug](https://github.com/robbert-vdh/nih-plug) + egui). Every Note On and
+Note Off goes through its own editable Bézier curve, like *Curves* in an image
+editor. High-resolution (14-bit) velocity via the CC88 prefix is supported on
+input and output.
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+Video demo (older version): [YouTube](https://www.youtube.com/watch?v=CtjtueLHJKM)
 
-## 📋 What was created
+## Features
 
-✅ **VST3 plugin** - Full-featured plugin based on NIH-plug  
-✅ **Standalone application** - Ready-to-use application with GUI  
-✅ **Cross-platform build** - Windows, macOS, Linux  
-✅ **Automatic build scripts** - One command for any platform  
-✅ **Detailed documentation** - BUILD_GUIDE.md with instructions  
+- Two curves: **Note On** and **Note Off** (release velocity), each with its
+  own undo/redo history.
+- The curve passes through its knots; each knot has Bézier handles. The curve is
+  always a function of velocity (handles are kept inside their segment).
+- **Hi-res velocity (CC88, MIDI CA-031).** Incoming CC88 is always decoded:
+  input x = (128·HH + LL)/16383 when a CC88 preceded the note on that channel,
+  otherwise x = HH/127. The *Hi-res output* switch selects the output format:
+  14 bit (CC88 + note, in the same sample) or plain 7 bit.
+- A Note On never leaves with velocity 0 (that would be a Note Off).
+- Everything else (CC, pitch bend, aftertouch, SysEx, clock) passes unchanged.
+- Shared preset folder for the plugin and the app:
+  `~/.config/vst_midi_curves/presets` (macOS: `~/Library/Application Support/…`,
+  Windows: `%APPDATA%\…`). Italic entries are built in.
+- Plugin state (both curves, output format, open tab) is saved in the DAW project.
+- Realtime path: no locks, no allocations, O(1) per note (~17 ns per message);
+  standalone loopback through ALSA adds ≈ 0 µs on top of midir (p99 69 µs total).
 
+## Editor
 
-## 🎥 Video Demo
+| Action | Gesture |
+|---|---|
+| add a knot (shape unchanged) | click on the curve |
+| move a knot / handle | drag (Shift — fine ×0.1, Ctrl — snap to 1/16) |
+| delete a knot | right click or double click; Del — selected knot |
+| corner knot | Alt+drag a handle; Alt+click a knot toggles smooth ↔ corner |
+| undo / redo | Ctrl+Z / Ctrl+Shift+Z (or the buttons) |
+| reset | *Diagonal* |
 
-- **YouTube**: [VST3 MIDI Curves Plugin Demo](https://www.youtube.com/watch?v=CtjtueLHJKM)
+The green marker shows where the last played note hit the curve. In a DAW the
+host may keep keyboard shortcuts for itself (in Reaper: enable *Send all
+keyboard input to plugin* for the FX window); the buttons always work.
 
+## VST3 or CLAP?
 
-## 🚀 Quick Start
+Prefer **CLAP** when you use hi-res velocity. In VST3, MIDI CCs reach the plugin
+as parameter changes: within one sample nih-plug delivers all CCs before the
+notes, so in a chord played in a single sample only the first note gets its own
+LL, and a host may drop a CC88 that repeats the previous value. CLAP delivers
+MIDI events in order and has neither problem.
 
-### For current platform (Linux):
-```bash
-# Build standalone application
-cargo build --release --bin midi_curves
-
-# Run
-./target/release/midi_curves
-```
-
-### For all platforms:
-```bash
-# Main build script (auto-detect platform)
-./build.sh current
-
-# For specific platform
-./build.sh windows
-./build.sh macos  
-./build.sh linux
-```
-
-## 📂 Project Structure
-
-```
-vst_midi_curves/
-├── Cargo.toml                    # Project configuration
-├── src/
-│   ├── lib.rs                    # VST3 plugin
-│   ├── main.rs                   # Standalone application
-│   ├── curve/                    # Bezier curves module
-│   ├── midi/                     # MIDI processing
-│   └── presets.rs                # Preset system
-├── build.sh                      # Main build script
-├── build_windows.sh              # Windows build
-├── build_macos.sh                # macOS build
-├── build_linux.sh                # Linux build
-└── BUILD_GUIDE.md               # Detailed documentation
-```
-
-## 🎯 Application Features
-
-### Standalone version:
-- 🎨 **Interactive GUI** - Real-time Bezier curve editing
-- 🎹 **MIDI input/output** - MIDI device connection
-- 📊 **Visualization** - Curve graph with control points
-- 📁 **Presets** - Curve save and load
-- 🧪 **Testing** - Velocity processing verification
-
-### VST3 plugin:
-- 🔌 **DAW integration** - Works in any VST3-compatible DAW
-- 🎵 **MIDI processing** - Real-time velocity transformation
-- ⚙️ **Settings** - Integration with VST3 parameter system
-
-## 🔧 Build Requirements
-
-### General:
-- Rust 1.70+ 
-- Cargo
-
-### Windows:
-- `cross` for cross-compilation: `cargo install cross`
-
-### macOS:
-- XCode Command Line Tools: `xcode-select --install`
-
-### Linux:
-- GTK4 development headers:
-  - Ubuntu/Debian: `sudo apt install libgtk-4-dev pkg-config`
-  - Fedora: `sudo dnf install gtk4-devel pkg-config jack-audio-connection-kit-devel mesa-libGL-devel mesa-libGLU-devel alsa-lib-devel`
-  - Arch: `sudo pacman -S gtk4 pkg-config`
-
-## 📦 Build Commands
+## Build
 
 ```bash
-# Standalone application
-cargo build --release --bin midi_curves
-
-# VST3 plugin (requires NIH-plug API updates)
-cargo build --release --bin midi_curves_vst3
-
-# Automatic build scripts
-./build.sh current        # Current platform
-./build.sh windows        # Windows
-./build.sh macos          # macOS (Universal Binary)
-./build.sh linux          # Linux
-./build.sh all            # All platforms
-./build.sh help           # Help
+./build_linux.sh        # Linux: checks dependencies, then ./build.sh
+./build.sh --install    # build, install to ~/.vst3 and ~/.clap, start Reaper (flatpak)
+./build_macos.sh        # macOS universal binary (VST3 + CLAP bundles)
+./build_windows.sh      # Windows (native or via `cross`)
 ```
 
-## 🎮 Usage
+Output: `build/midi_curves_v<version>/` with `MidiCurves.vst3`, `MidiCurves.clap`
+and the standalone `midi_curves`. Details and dependencies: [BUILD_GUIDE.md](BUILD_GUIDE.md).
+Release builds belong in GitHub Releases, not in git.
 
-### Standalone application:
-1. Build the application: `cargo build --release --bin midi_curves`
-2. Run: `./target/release/midi_curves`
-3. Connect MIDI devices
-4. Edit curve by dragging points
-5. Test MIDI processing
+## Standalone
 
-### VST3 plugin:
-1. Build the plugin: `cargo build --release --bin midi_curves_vst3`
-2. Copy the result to your system's VST3 folder
-3. Load in DAW
-4. Configure curve and MIDI routing
+`midi_curves` connects one MIDI input to one MIDI output (e.g. keyboard →
+*Midi Through* → a synth). Ports are matched by exact name, or by name without
+the ALSA address (`… 24:0`) when the device reconnected under another client
+number; *Refresh* rescans. Settings live in `~/.config/vst_midi_curves/settings.json`
+(old-format files are migrated; the old file is kept as `settings.v1.json`).
 
-## 🛠️ Troubleshooting
+## Tests
 
-### Compilation errors:
 ```bash
-# Clean cache
-cargo clean
-
-# Update Rust
-rustup update
-
-# Rebuild
-cargo build --release
+cargo test                                                         # all tests
+cargo test --release --test realtime -- --include-ignored --nocapture  # + stress, ns/event
+cargo build --features assert_process_allocs   # debug plugin that aborts on any allocation in process()
 ```
 
-### VST3 plugin requires updates:
-NIH-plug API has changed. Need to update:
-- Type imports (`Version`, `ReachedWaker`)
-- `SysExMessage` implementation
-- Plugin parameters
+Tests never touch the real `~/.config` (temporary folders). See
+[ARCHITECTURE.md](ARCHITECTURE.md) for the code map.
 
-### Linux-specific:
-```bash
-# Install Ubuntu/Debian dependencies
-sudo apt install libgtk-4-dev libssl-dev libasound2-dev libudev-dev
-```
+## License
 
-## 📚 Documentation
-
-- **BUILD_GUIDE.md** - Detailed build instructions
-- **ARCHITECTURE.md** - Project architecture
-- **Cargo.toml** - Configuration and dependencies
-
-
-## 🎯 Result
-
-You got:
-- ✅ **Working standalone application** with full GUI
-- ✅ **VST3 plugin basic structure** (requires final completion)
-- ✅ **Cross-platform build scripts**
-- ✅ **Detailed documentation**
-- ✅ **Ready architecture** for extension
-
-Standalone version is fully functional and ready to use!
-VST3 plugin has a working foundation but requires final NIH-plug API completion.
-
-**Time to complete VST3: ~2-4 hours for experienced Rust developer**
+MIT — see [LICENSE](LICENSE).

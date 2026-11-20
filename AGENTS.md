@@ -2,24 +2,29 @@
 
 Корень репо (CWD-якорь): `/home/sche/Documents/programming/Piano/vst_midi_curves`.
 
-VST3-плагин и standalone-приложение на Rust (nih-plug + egui): преобразование
-velocity MIDI-нот через редактируемую кривую (как «Кривые» в Photoshop).
+VST3/CLAP-плагин и standalone-приложение на Rust (nih-plug + egui 0.31):
+преобразование velocity MIDI-нот (Note On и Note Off отдельно, 14 бит через
+CC88) через редактируемую кривую (как «Кривые» в Photoshop). Модель кривой и
+редактор перенесены из piano_sim.
 
 Карта проекта: открывай нужное по задаче.
-- `src/lib.rs` — VST3-плагин (nih-plug): `MidiCurvesPlugin`, параметры,
-  hi-res velocity буфер (`VstHiResBuffer`), GUI плагина, `nih_export_vst3!`;
-- `src/main.rs` — standalone-приложение (eframe): `MidiCurvesApp`, отрисовка
-  графика и точек, панель пресетов;
-- `src/curve/` — математика кривых: `bezier.rs`, `dual_curve.rs` (двойная
-  кривая), `interpolation.rs`, `control_point.rs`;
-- `src/midi/` — MIDI для standalone: `ports.rs`, `device_manager.rs`
-  (горячее подключение устройств), `processor.rs`; `src/midi_simple.rs` —
-  упрощённый менеджер MIDI;
-- `src/presets.rs` — пресеты кривых (`PresetManager`), `src/settings.rs` —
-  настройки приложения;
-- `tests/` — интеграционные тесты (`curve_tests.rs`, `standalone_tests.rs`).
-- Сборка: `./build.sh` / `build_linux.sh` / `build_macos.sh` / `build_windows.sh`,
-  `cargo build --release` (lib → VST3, bin `midi_curves` → standalone).
+- `src/lib.rs` — плагин (nih-plug): `MidiCurvesPlugin`, `#[persist]`-состояние,
+  `process_event` (путь аудиопотока), GUI плагина, `nih_export_vst3!`/`clap!`;
+- `src/main.rs` — standalone (eframe): `App`, панель портов, настройки;
+  `src/midi.rs` — только standalone: порты midir и колбэк MIDI;
+- `src/velocity.rs` — декодирование CC88+нота, кодирование 7/14 бит, префикс
+  по каналам, `process_midi` (байты → байты);
+- `src/curve/` — `shape.rs` (`CurveShape`, узлы+ручки), `bank.rs` (`CurveBank`,
+  LUT на атомиках для потока MIDI), `legacy.rs` (миграция старого формата),
+  `mod.rs` (`CurveSet`);
+- `src/editor.rs` — общий egui-редактор (`CurvesUi`, undo/redo `History`);
+  `src/library.rs` — библиотека форм (пресеты); `src/settings.rs` — настройки
+  standalone;
+- `tests/` — `realtime.rs` (0 аллокаций, стресс, бенчмарк), `public_api.rs`,
+  `fixtures/legacy/` (старые пресеты/настройки для проверки миграции).
+- Сборка: `./build.sh` (`--install` — в ~/.vst3, ~/.clap и запуск Reaper) /
+  `build_linux.sh` / `build_macos.sh` / `build_windows.sh`; `cargo build
+  --release` (lib → VST3+CLAP, bin `midi_curves` → standalone).
   `build/midi_curves_v0.1.0/` — собранный релиз (вывод `build.sh`, в `.gitignore`).
   `Cargo.lock` в git: фиксирует ревизию nih-plug из git.
 - Документация: `README.md`, `ARCHITECTURE.md`, `BUILD_GUIDE.md`.
