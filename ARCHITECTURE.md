@@ -40,7 +40,7 @@ the curve is always a function of velocity; `eval(x)` finds t by bisection.
 |---|---|---|
 | MIDI | host audio thread: `process()` → `process_event` | midir input callback → `velocity::process_midi` → output `send` |
 | GUI | baseview: `CurvesUi`, writes LUTs and `#[persist]` state | eframe: `CurvesUi`, writes LUTs, saves settings |
-| other | host main thread: state save/load, `initialize()` refills LUTs | repaint watcher: polls the note counter, wakes the GUI |
+| other | host main thread: state save/load, `initialize()` refills LUTs | repaint watcher: polls the note counter, wakes the GUI; `midi-ports`: every 2 s re-scans ports and reconnects the chosen pair (`Midi::refresh`, shares `Mutex<Midi>` with the GUI only) |
 
 Rules on the MIDI path: atomics only (no `Mutex`/`RwLock`), no allocation,
 no syscalls besides the standalone's own `send`, O(1) per event.

@@ -5,12 +5,14 @@
 //!
 //! Потоки: колбэк midir — весь путь MIDI (см. `midi.rs`); поток eframe — GUI;
 //! поток-наблюдатель будит GUI, когда сыграна нота (маркер на кривой): сам
-//! поток MIDI egui не трогает.
+//! поток MIDI egui не трогает; поток `midi-ports` раз в [`midi::POLL_PERIOD`]
+//! обновляет списки портов и автоподключает выбранные (работает и при
+//! свёрнутом окне, когда eframe не зовёт `update`).
 
 mod midi;
 
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
 use eframe::egui;
@@ -23,13 +25,16 @@ struct App {
     bank: Arc<CurveBank>,
     set: CurveSet,
     ui: CurvesUi,
-    midi: midi::Midi,
+    /// Общее с потоком `midi-ports`; путь MIDI (колбэк midir) мьютекс не берёт.
+    midi: Arc<Mutex<midi::Midi>>,
     settings: Settings,
     settings_path: Option<PathBuf>,
-    inputs: Vec<String>,
-    outputs: Vec<String>,
-    /// Последнее сообщение для строки состояния (ошибка?, текст).
-    status: Option<(bool, String)>,
+    /// Ошибка настроек для строки состояния.
+    status: Option<String>,
+}
+
+fn lock(m: &Mutex<midi::Midi>) -> MutexGuard<'_, midi::Midi> {
+    m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 impl App {
@@ -43,30 +48,18 @@ impl App {
         let set = settings.curves.clone();
         set.apply(&bank);
         let tab = if settings.active_curve_tab == 1 { Slot::NoteOff } else { Slot::NoteOn };
-        let mut app = Self {
+        // Запомненные порты подключаются сразу, если они есть; нет — их
+        // подключит поток `midi-ports`, когда появятся.
+        let mut midi = midi::Midi::new(bank.clone());
+        midi.select(settings.last_input_port.clone(), settings.last_output_port.clone());
+        Self {
             ui: CurvesUi::new(&set, tab, Library::new(library::default_dir())),
-            midi: midi::Midi::new(bank.clone()),
+            midi: Arc::new(Mutex::new(midi)),
             bank,
             set,
             settings,
             settings_path,
-            inputs: midi::input_ports(),
-            outputs: midi::output_ports(),
-            status: err.map(|e| (true, e)),
-        };
-        if app.settings.last_input_port.is_some() || app.settings.last_output_port.is_some() {
-            app.reconnect();
-        }
-        app
-    }
-
-    /// Подключить порты из настроек; при ошибке настройки не трогаем —
-    /// устройство может появиться позже (Refresh, выбор порта).
-    fn reconnect(&mut self) {
-        let (i, o) = (self.settings.last_input_port.clone(), self.settings.last_output_port.clone());
-        match self.midi.connect(i.as_deref(), o.as_deref()) {
-            Ok(()) => self.status = None,
-            Err(e) => self.status = Some((true, e)),
+            status: err,
         }
     }
 
@@ -75,7 +68,7 @@ impl App {
         self.settings.active_curve_tab = self.ui.tab.idx() as u8;
         if let Some(p) = &self.settings_path {
             if let Err(e) = self.settings.save(p) {
-                self.status = Some((true, format!("settings: {e}")));
+                self.status = Some(format!("settings: {e}"));
             }
         }
     }
@@ -103,30 +96,32 @@ impl eframe::App for App {
         let mut pick_in = None;
         let mut pick_out = None;
         let mut refresh = false;
-        let (settings, midi, inputs, outputs, status) =
-            (&self.settings, &self.midi, &self.inputs, &self.outputs, &self.status);
+        let mut midi = lock(&self.midi);
+        let (settings, m, status) = (&self.settings, &*midi, &self.status);
         let out = self.ui.show(ctx, &mut self.set, &self.bank, |ui| {
             ui.label(egui::RichText::new("MIDI").strong());
             ui.horizontal(|ui| {
                 ui.label("In ");
-                pick_in = port_combo(ui, "midi_in", &settings.last_input_port, inputs);
+                pick_in = port_combo(ui, "midi_in", &settings.last_input_port, &m.ports.inputs);
             });
             ui.horizontal(|ui| {
                 ui.label("Out");
-                pick_out = port_combo(ui, "midi_out", &settings.last_output_port, outputs);
+                pick_out = port_combo(ui, "midi_out", &settings.last_output_port, &m.ports.outputs);
             });
             ui.horizontal(|ui| {
-                refresh = ui.button("Refresh").on_hover_text("Re-scan MIDI ports").clicked();
-                let (c, t) = match (&midi.input, &midi.output) {
+                refresh = ui
+                    .button("Refresh")
+                    .on_hover_text("Re-scan MIDI ports and reconnect (ports are also re-scanned every 2 s)")
+                    .clicked();
+                let (c, t) = match (&m.input, &m.output) {
                     (Some(_), Some(_)) => (egui::Color32::from_rgb(100, 200, 100), "connected"),
                     (Some(_), None) => (egui::Color32::from_rgb(220, 200, 100), "input only"),
                     _ => (egui::Color32::from_rgb(200, 110, 100), "not connected"),
                 };
                 ui.colored_label(c, t);
             });
-            if let Some((err, text)) = status {
-                let c = if *err { egui::Color32::from_rgb(230, 110, 100) } else { egui::Color32::from_gray(160) };
-                ui.colored_label(c, text);
+            for text in [&m.error, status].into_iter().flatten() {
+                ui.colored_label(egui::Color32::from_rgb(230, 110, 100), text);
             }
             ui.separator();
         });
@@ -139,23 +134,21 @@ impl eframe::App for App {
         if out.hi_res {
             self.bank.set_hi_res(self.set.hi_res);
         }
-        let mut save = out.committed || out.hi_res || out.tab;
-        if refresh {
-            self.inputs = midi::input_ports();
-            self.outputs = midi::output_ports();
-            self.reconnect();
+        let picked = pick_in.is_some() || pick_out.is_some();
+        if let Some(p) = pick_in {
+            self.settings.last_input_port = p;
         }
-        if pick_in.is_some() || pick_out.is_some() {
-            if let Some(p) = pick_in {
-                self.settings.last_input_port = p;
-            }
-            if let Some(p) = pick_out {
-                self.settings.last_output_port = p;
-            }
-            self.reconnect();
-            save = true;
+        if let Some(p) = pick_out {
+            self.settings.last_output_port = p;
         }
-        if save {
+        // Refresh переподключает и исправное на вид соединение: устройство,
+        // переподключённое быстрее периода опроса, возвращается под тем же
+        // адресом ALSA, и по списку портов его прежняя подписка не отличима.
+        if refresh || picked {
+            midi.select(self.settings.last_input_port.clone(), self.settings.last_output_port.clone());
+        }
+        drop(midi);
+        if out.committed || out.hi_res || out.tab || picked {
             self.save();
         }
     }
@@ -181,18 +174,30 @@ fn spawn_repaint_watcher(ctx: egui::Context, bank: Arc<CurveBank>) {
     });
 }
 
+/// Раз в [`midi::POLL_PERIOD`]: свежие списки портов и автоподключение
+/// выбранных; GUI будится, только если что-то изменилось.
+fn spawn_port_watcher(ctx: egui::Context, midi: Arc<Mutex<midi::Midi>>) {
+    let _ = std::thread::Builder::new().name("midi-ports".into()).spawn(move || loop {
+        std::thread::sleep(midi::POLL_PERIOD);
+        if lock(&midi).refresh() {
+            ctx.request_repaint();
+        }
+    });
+}
+
 fn main() -> Result<(), eframe::Error> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default().with_inner_size([1000.0, 640.0]).with_title("MIDI Curves"),
         ..Default::default()
     };
     let app = App::new();
-    let bank = app.bank.clone();
+    let (bank, midi) = (app.bank.clone(), app.midi.clone());
     eframe::run_native(
         "MIDI Curves",
         options,
         Box::new(move |cc| {
             spawn_repaint_watcher(cc.egui_ctx.clone(), bank);
+            spawn_port_watcher(cc.egui_ctx.clone(), midi);
             Ok(Box::new(app))
         }),
     )

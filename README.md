@@ -68,7 +68,11 @@ Release builds belong in GitHub Releases, not in git.
 `midi_curves` connects one MIDI input to one MIDI output (e.g. keyboard →
 *Midi Through* → a synth). Ports are matched by exact name, or by name without
 the ALSA address (`… 24:0`) when the device reconnected under another client
-number; *Refresh* rescans. Settings live in `~/.config/vst_midi_curves/settings.json`
+number. The chosen pair is remembered and reconnected automatically: the port
+lists are re-scanned every 2 s, a port that disappeared closes the connection and
+the chosen device is connected as soon as it (re)appears — also when it is plugged
+in after start. *Refresh* re-scans and reconnects at once. The app's own ports are
+not listed (choosing them would make a loop). Settings live in `~/.config/vst_midi_curves/settings.json`
 (old-format files are migrated; the old file is kept as `settings.v1.json`).
 
 ## Tests
