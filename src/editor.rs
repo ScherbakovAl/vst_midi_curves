@@ -218,9 +218,12 @@ impl CurvesUi {
         side: impl FnOnce(&mut egui::Ui),
     ) -> Outcome {
         let mut out = Outcome::default();
+        // Клавиши — только вне жеста мышью (Ctrl+Z посреди драга не отменяет);
+        // кнопки — всегда (кликом по кнопке график не тащат).
+        let pointer_busy = ctx.is_using_pointer() || ctx.input(|i| i.pointer.any_down());
         let (undo_key, redo_key) = undo_keys(ctx);
-        let mut undo_req = undo_key;
-        let mut redo_req = redo_key;
+        let mut undo_req = undo_key && !pointer_busy;
+        let mut redo_req = redo_key && !pointer_busy;
 
         egui::TopBottomPanel::top("curves_top").show(ctx, |ui| {
             ui.horizontal(|ui| {
@@ -287,7 +290,7 @@ impl CurvesUi {
         // История: снимок на отпускании ввода, отмена — только вне жеста.
         let released = input_released(ctx, &mut self.prev_busy);
         let tab = self.tab.idx();
-        if !self.prev_busy && (undo_req || redo_req) {
+        if undo_req || redo_req {
             let shape = set.shape_mut(self.tab);
             let done = if undo_req { self.hist[tab].undo(shape) } else { self.hist[tab].redo(shape) };
             if done {
@@ -306,7 +309,13 @@ impl CurvesUi {
 
     fn library_panel(&mut self, ui: &mut egui::Ui, set: &mut CurveSet, out: &mut Outcome) {
         ui.label(egui::RichText::new("Presets").strong());
-        let list = self.lib_list.get_or_insert_with(|| self.lib.scan()).clone();
+        // Список берётся из кэша на время кадра (без копии); `rescan` — вернуть
+        // его в кэш не надо, папку перечитать в следующем кадре.
+        let list = match self.lib_list.take() {
+            Some(l) => l,
+            None => self.lib.scan(),
+        };
+        let mut rescan = false;
         let mut load: Option<String> = None;
         egui::ScrollArea::vertical().max_height(220.0).auto_shrink([false, true]).show(ui, |ui| {
             for e in &list {
@@ -343,7 +352,7 @@ impl CurvesUi {
                 match self.lib.save(&name, set.shape(self.tab)) {
                     Ok(()) => {
                         self.notice = Some((false, format!("Saved «{name}»")));
-                        self.lib_list = None;
+                        rescan = true;
                     }
                     Err(e) => self.notice = Some((true, format!("«{name}»: {e}"))),
                 }
@@ -365,19 +374,22 @@ impl CurvesUi {
                         Ok(()) => self.notice = Some((false, format!("Deleted «{name}»"))),
                         Err(e) => self.notice = Some((true, format!("«{name}»: {e}"))),
                     }
-                    self.lib_list = None;
+                    rescan = true;
                     self.delete_armed = None;
                 } else {
                     self.delete_armed = Some(name);
                 }
             }
             if ui.button("Rescan").on_hover_text("Re-read the preset folder").clicked() {
-                self.lib_list = None;
+                rescan = true;
             }
         });
         if let Some((err, text)) = &self.notice {
             let c = if *err { Color32::from_rgb(230, 110, 100) } else { Color32::from_gray(160) };
             ui.colored_label(c, text);
+        }
+        if !rescan {
+            self.lib_list = Some(list);
         }
     }
 }
@@ -828,6 +840,36 @@ mod tests {
         assert_eq!(h.set.note_on.knots.len(), 2);
         h.click(h.at([0.0, 0.0]), egui::PointerButton::Secondary);
         assert_eq!(h.set.note_on.knots.len(), 2);
+    }
+
+    #[test]
+    fn ctrl_z_during_drag_is_ignored() {
+        let mut h = Harness::new();
+        h.click(h.at([0.5, 0.5]), egui::PointerButton::Primary);
+        let inserted = h.set.note_on.clone();
+        let from = h.at([0.5, 0.5]);
+        h.frame(vec![egui::Event::PointerMoved(from)], egui::Modifiers::NONE);
+        h.button(from, egui::PointerButton::Primary, true);
+        for j in 1..=5 {
+            h.frame(vec![egui::Event::PointerMoved(from + egui::vec2(0.0, -8.0 * j as f32))], egui::Modifiers::NONE);
+        }
+        assert_ne!(h.set.note_on, inserted);
+        let z = egui::Event::Key {
+            key: egui::Key::Z,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::CTRL,
+        };
+        // Ctrl посреди драга — привязка к сетке (y → 9/16), но не отмена.
+        h.frame(vec![z], egui::Modifiers::CTRL);
+        assert_ne!(h.set.note_on, inserted, "Ctrl+Z посреди драга отменил правку");
+        assert_eq!(h.set.note_on.knots[1].y, 9.0 / 16.0);
+        h.button(from + egui::vec2(0.0, -40.0), egui::PointerButton::Primary, false);
+        h.frame(vec![], egui::Modifiers::NONE);
+        // После отпускания — обычная отмена: назад к форме до драга.
+        h.key(egui::Key::Z, egui::Modifiers::CTRL);
+        assert_eq!(h.set.note_on, inserted);
     }
 
     #[test]

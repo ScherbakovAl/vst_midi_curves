@@ -248,8 +248,9 @@ impl Plugin for MidiCurvesPlugin {
         _buffer_config: &BufferConfig,
         _context: &mut impl InitContext<Self>,
     ) -> bool {
-        // Вызывается и после загрузки состояния хостом: залить таблицы из него.
-        let mut set = read(&self.params.curves).clone();
+        // Вызывается и после загрузки состояния хостом: починить формы (их
+        // увидит и GUI) и залить таблицы.
+        let mut set = self.params.curves.write().unwrap_or_else(|e| e.into_inner());
         set.normalize();
         set.apply(&self.bank);
         true
