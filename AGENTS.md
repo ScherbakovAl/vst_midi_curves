@@ -20,7 +20,8 @@ velocity MIDI-нот через редактируемую кривую (как 
 - `tests/` — интеграционные тесты (`curve_tests.rs`, `standalone_tests.rs`).
 - Сборка: `./build.sh` / `build_linux.sh` / `build_macos.sh` / `build_windows.sh`,
   `cargo build --release` (lib → VST3, bin `midi_curves` → standalone).
-  `build/midi_curves_v0.1.0/` — собранный релиз (артефакт в git).
+  `build/midi_curves_v0.1.0/` — собранный релиз (вывод `build.sh`, в `.gitignore`).
+  `Cargo.lock` в git: фиксирует ревизию nih-plug из git.
 - Документация: `README.md`, `ARCHITECTURE.md`, `BUILD_GUIDE.md`.
 Осознай контекст проекта. (Fedora)
 
