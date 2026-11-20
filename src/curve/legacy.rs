@@ -54,12 +54,20 @@ fn linear_handles(knots: &mut [Knot], i: usize) {
     knots[i + 1].hin = [-d[0], -d[1]];
 }
 
+/// Крайние узлы рисуются гладкими (у них одна ручка — угол им ни к чему).
+fn smooth_ends(knots: &mut [Knot]) {
+    let n = knots.len();
+    knots[0].smooth = true;
+    knots[n - 1].smooth = true;
+}
+
 /// Ломаная по узлам: все сегменты — отрезки.
 fn polyline(pts: &[(f32, f32)]) -> CurveShape {
     let mut knots: Vec<Knot> = pts.iter().map(|&(x, y)| corner(x, y)).collect();
     for i in 0..knots.len() - 1 {
         linear_handles(&mut knots, i);
     }
+    smooth_ends(&mut knots);
     CurveShape { knots }
 }
 
@@ -116,6 +124,7 @@ fn from_cubic(p: [LegacyPoint; 4]) -> CurveShape {
         let n = knots.len();
         linear_handles(&mut knots, n - 2);
     }
+    smooth_ends(&mut knots);
     let mut shape = CurveShape { knots };
     shape.normalize();
     shape

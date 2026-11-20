@@ -29,6 +29,11 @@ midir = "0.8"  # For MIDI ports
 # Additional dependencies
 dirs = "5.0"   # For working with configuration directories
 
+[features]
+# Отладочная сборка плагина, которая падает на любой аллокации в process():
+#   cargo build --features assert_process_allocs
+assert_process_allocs = ["nih_plug/assert_process_allocs"]
+
 [dev-dependencies]
 tempfile = "3.0"   # For temporary files in tests
 

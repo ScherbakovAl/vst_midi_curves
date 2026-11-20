@@ -163,12 +163,6 @@ impl DualCurve {
     pub fn note_off_points_count(&self) -> usize {
         self.note_off_curve.control_points.len()
     }
-
-    /// Загружает пресет (только для кривой NoteOn в данной реализации)
-    pub fn load_from_preset(&mut self, preset: &crate::presets::CurvePreset) {
-        self.note_on_curve.control_points = preset.to_control_points();
-        self.note_on_curve.dirty = true;
-    }
 }
 
 impl Default for DualCurve {

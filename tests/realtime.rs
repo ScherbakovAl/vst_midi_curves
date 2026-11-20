@@ -11,7 +11,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
+use nih_plug::prelude::NoteEvent;
 use vst_midi_curves::curve::{CurveBank, CurveShape, Slot};
+use vst_midi_curves::process_event;
 use vst_midi_curves::velocity::{process_midi, Prefix};
 
 /// Глобальный аллокатор со счётчиком на поток: тесты идут параллельно, считаем
@@ -94,6 +96,31 @@ fn no_allocations_on_the_midi_path() {
         assert_eq!(allocs() - before, 0, "аллокации на пути MIDI (hi-res = {hi})");
     }
     assert!(emitted > 0);
+}
+
+/// То же для события аудиопотока плагина (`process()` зовёт только это).
+#[test]
+fn no_allocations_in_plugin_process_event() {
+    let bank = CurveBank::new();
+    bank.store(Slot::NoteOff, &steep());
+    let mut prefix = Prefix::new();
+    let mut last = None;
+    for hi in [false, true] {
+        bank.set_hi_res(hi);
+        let before = allocs();
+        for i in 0..10_000u32 {
+            let [st, d1, d2] = message(i);
+            let (timing, channel) = (i % 512, st & 0x0F);
+            let ev: NoteEvent<()> = match st & 0xF0 {
+                0xB0 => NoteEvent::MidiCC { timing, channel, cc: d1, value: d2 as f32 / 127.0 },
+                0x90 => NoteEvent::NoteOn { timing, voice_id: None, channel, note: d1, velocity: d2 as f32 / 127.0 },
+                _ => NoteEvent::NoteOff { timing, voice_id: None, channel, note: d1, velocity: d2 as f32 / 127.0 },
+            };
+            process_event(&bank, &mut prefix, ev, |o| last = Some(o));
+        }
+        assert_eq!(allocs() - before, 0, "аллокации в process_event (hi-res = {hi})");
+    }
+    assert!(last.is_some());
 }
 
 /// Поток-писатель непрерывно перезаливает таблицы двумя разными формами и
