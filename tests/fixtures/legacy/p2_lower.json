@@ -1,0 +1,38 @@
+{
+  "name": "p2",
+  "description": "Preset NoteOn, created 1762267789",
+  "control_points": [
+    {
+      "x": 0.0,
+      "y": 0.0,
+      "handle_in_x": 0.0,
+      "handle_in_y": 0.0,
+      "handle_out_x": 0.0,
+      "handle_out_y": 0.0
+    },
+    {
+      "x": 7.765639,
+      "y": 2.9035265,
+      "handle_in_x": -71.53663,
+      "handle_in_y": -297.6067,
+      "handle_out_x": -71.53663,
+      "handle_out_y": -297.6067
+    },
+    {
+      "x": 1.3465401,
+      "y": 67.002975,
+      "handle_in_x": -755.8088,
+      "handle_in_y": -1212.496,
+      "handle_out_x": -755.8088,
+      "handle_out_y": -1212.496
+    },
+    {
+      "x": 127.0,
+      "y": 127.0,
+      "handle_in_x": 0.0,
+      "handle_in_y": 0.0,
+      "handle_out_x": 0.0,
+      "handle_out_y": 0.0
+    }
+  ]
+}

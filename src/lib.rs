@@ -18,7 +18,8 @@ use crate::presets::PresetManager;
 use crate::settings::SettingsManager;
 
 // Import all necessary modules
-mod curve;
+pub mod curve;
+pub mod velocity;
 mod presets;
 mod midi;
 mod midi_simple;

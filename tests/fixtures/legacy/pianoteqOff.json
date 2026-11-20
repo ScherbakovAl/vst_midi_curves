@@ -1,0 +1,22 @@
+{
+  "name": "pianoteqOff",
+  "description": "Preset NoteOff, created 1762265853",
+  "control_points": [
+    {
+      "x": 0.0,
+      "y": 54.45456,
+      "handle_in_x": -55.973545,
+      "handle_in_y": 54.45456,
+      "handle_out_x": -55.973545,
+      "handle_out_y": 54.45456
+    },
+    {
+      "x": 127.0,
+      "y": 127.0,
+      "handle_in_x": 0.0,
+      "handle_in_y": 0.0,
+      "handle_out_x": 0.0,
+      "handle_out_y": 0.0
+    }
+  ]
+}

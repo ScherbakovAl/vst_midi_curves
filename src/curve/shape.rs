@@ -1,0 +1,331 @@
+//! Форма кривой velocity — перенос `CurveShape` из piano_sim
+//! (`src/gui/vel_curve.rs`, тот же автор) почти дословно.
+//!
+//! Кривая живёт в единичном квадрате: x — входная velocity 0…1, y — выходная
+//! 0…1. Узлы по возрастанию x, крайние — на x = 0 и 1; кривая ПРОХОДИТ через
+//! узлы, между соседними узлами — кубический Безье
+//!
+//!   B(t) = (1−t)³·P₀ + 3(1−t)²t·P₁ + 3(1−t)t²·P₂ + t³·P₃,  t ∈ [0, 1],
+//!
+//! где P₀ — узел i, P₁ = P₀ + `hout`ᵢ, P₂ = P₃ + `hin`ᵢ₊₁, P₃ — узел i+1
+//! ([`CurveShape::seg`]). Ручки по x ужимаются в ширину сегмента
+//! ([`fit_handle`]) ⇒ x(t) монотонна ⇒ кривая всегда функция velocity.
+
+use serde::{Deserialize, Serialize};
+
+/// Наименьший зазор по x между соседними узлами кривой.
+pub const KNOT_GAP: f32 = 1.0e-3;
+
+/// Узел кривой с ручками Безье. Ручки — смещения от узла: входящая (`hin`,
+/// x ≤ 0) и исходящая (`hout`, x ≥ 0). Храним их «как поставили»: по x ручка
+/// при вычислении ужимается в ширину своего сегмента (см. [`CurveShape::h_out`]),
+/// поэтому сдвиг узла туда-обратно форму не портит.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Knot {
+    pub x: f32,
+    pub y: f32,
+    pub hin: [f32; 2],
+    pub hout: [f32; 2],
+    /// Гладкий узел: ручки на одной прямой (Alt+драг ручки ломает).
+    pub smooth: bool,
+}
+
+/// Кривая в единичном квадрате: узлы по возрастанию x, крайние — на x = 0 и 1.
+/// Ручки по x не выходят за свой сегмент ⇒ x(t) каждого сегмента монотонна
+/// (производная в базисе Бернштейна неотрицательна при x₁, x₂ ∈ [x₀, x₃]) —
+/// кривая остаётся ФУНКЦИЕЙ velocity при любом изгибе.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CurveShape {
+    pub knots: Vec<Knot>,
+}
+
+impl Default for CurveShape {
+    fn default() -> Self {
+        Self::linear()
+    }
+}
+
+pub type P2 = [f32; 2];
+
+fn lerp2(a: P2, b: P2, t: f32) -> P2 {
+    [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]
+}
+
+fn add2(a: P2, b: P2) -> P2 {
+    [a[0] + b[0], a[1] + b[1]]
+}
+
+fn sub2(a: P2, b: P2) -> P2 {
+    [a[0] - b[0], a[1] - b[1]]
+}
+
+/// Ужать ручку по x в [0, w] (знак x — по стороне: `sign` = +1 исходящая,
+/// −1 входящая), сохраняя направление: вектор масштабируется целиком.
+fn fit_handle(h: P2, w: f32, sign: f32) -> P2 {
+    let hx = (h[0] * sign).max(0.0);
+    let h = [hx * sign, h[1]];
+    if hx > w {
+        let k = w / hx;
+        [h[0] * k, h[1] * k]
+    } else {
+        h
+    }
+}
+
+/// Точка кубического Безье по контрольным точкам.
+pub(crate) fn bez(p: &[P2; 4], t: f32) -> P2 {
+    let u = 1.0 - t;
+    let (a, b, c, d) = (u * u * u, 3.0 * u * u * t, 3.0 * u * t * t, t * t * t);
+    [
+        a * p[0][0] + b * p[1][0] + c * p[2][0] + d * p[3][0],
+        a * p[0][1] + b * p[1][1] + c * p[2][1] + d * p[3][1],
+    ]
+}
+
+impl CurveShape {
+    /// Диагональ y = x.
+    pub fn linear() -> Self {
+        let h = 1.0 / 3.0;
+        Self {
+            knots: vec![
+                Knot { x: 0.0, y: 0.0, hin: [0.0, 0.0], hout: [h, h], smooth: true },
+                Knot { x: 1.0, y: 1.0, hin: [-h, -h], hout: [0.0, 0.0], smooth: true },
+            ],
+        }
+    }
+
+    /// Действующая исходящая ручка узла `i` (ужата в ширину сегмента справа).
+    pub fn h_out(&self, i: usize) -> P2 {
+        let k = &self.knots;
+        let w = if i + 1 < k.len() { k[i + 1].x - k[i].x } else { 0.0 };
+        fit_handle(k[i].hout, w, 1.0)
+    }
+
+    /// Действующая входящая ручка узла `i` (ужата в ширину сегмента слева).
+    pub fn h_in(&self, i: usize) -> P2 {
+        let k = &self.knots;
+        let w = if i > 0 { k[i].x - k[i - 1].x } else { 0.0 };
+        fit_handle(k[i].hin, w, -1.0)
+    }
+
+    pub fn pt(&self, i: usize) -> P2 {
+        [self.knots[i].x, self.knots[i].y]
+    }
+
+    /// Контрольные точки сегмента между узлами `i` и `i+1`.
+    pub fn seg(&self, i: usize) -> [P2; 4] {
+        let (a, b) = (self.pt(i), self.pt(i + 1));
+        [a, add2(a, self.h_out(i)), add2(b, self.h_in(i + 1)), b]
+    }
+
+    /// Сегмент, на котором лежит x, и параметр t точки кривой с этим x.
+    fn locate(&self, x: f32) -> (usize, f32) {
+        let x = x.clamp(0.0, 1.0);
+        let n = self.knots.len();
+        let i = self.knots[1..n - 1].iter().take_while(|k| k.x <= x).count();
+        let p = self.seg(i);
+        if p[3][0] - p[0][0] <= 0.0 {
+            return (i, 0.0);
+        }
+        // x(t) монотонна (см. CurveShape) — бисекция надёжна и на плоских
+        // участках производной, где Ньютон бы споткнулся.
+        let (mut lo, mut hi) = (0.0f32, 1.0f32);
+        for _ in 0..32 {
+            let mid = 0.5 * (lo + hi);
+            if bez(&p, mid)[0] < x {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        (i, 0.5 * (lo + hi))
+    }
+
+    /// y(x) кривой, зажатый в [0, 1] (перелёт ручек за край — по краю).
+    pub fn eval(&self, x: f32) -> f32 {
+        let (i, t) = self.locate(x);
+        bez(&self.seg(i), t)[1].clamp(0.0, 1.0)
+    }
+
+    /// Привести форму в допустимую: ≥2 конечных узла по возрастанию x с
+    /// зазором, крайние на 0 и 1, y в [0, 1]. Чинит формы из файлов.
+    pub fn normalize(&mut self) {
+        let finite = self.knots.iter().all(|k| {
+            [k.x, k.y, k.hin[0], k.hin[1], k.hout[0], k.hout[1]].iter().all(|v| v.is_finite())
+        });
+        if self.knots.len() < 2 || !finite {
+            *self = Self::linear();
+            return;
+        }
+        self.knots.sort_by(|a, b| a.x.total_cmp(&b.x));
+        let n = self.knots.len();
+        self.knots[0].x = 0.0;
+        self.knots[n - 1].x = 1.0;
+        for i in 1..n - 1 {
+            let lo = self.knots[i - 1].x + KNOT_GAP;
+            let hi = 1.0 - KNOT_GAP * (n - 1 - i) as f32;
+            self.knots[i].x = self.knots[i].x.clamp(lo, hi.max(lo));
+        }
+        for k in &mut self.knots {
+            k.y = k.y.clamp(0.0, 1.0);
+        }
+    }
+
+    /// Вставить узел в точку кривой с абсциссой `x`, НЕ меняя форму
+    /// (разбиение сегмента де Кастельжо). Индекс нового узла; `None` — точка
+    /// вплотную к существующему узлу.
+    pub fn insert_at(&mut self, x: f32) -> Option<usize> {
+        let (i, t) = self.locate(x);
+        let p = self.seg(i);
+        let (p01, p12, p23) = (lerp2(p[0], p[1], t), lerp2(p[1], p[2], t), lerp2(p[2], p[3], t));
+        let (p012, p123) = (lerp2(p01, p12, t), lerp2(p12, p23, t));
+        let m = lerp2(p012, p123, t);
+        let gap_ok = m[0] - self.knots[i].x >= KNOT_GAP && self.knots[i + 1].x - m[0] >= KNOT_GAP;
+        if !gap_ok {
+            return None;
+        }
+        self.knots[i].hout = sub2(p01, p[0]);
+        self.knots[i + 1].hin = sub2(p23, p[3]);
+        self.knots.insert(
+            i + 1,
+            Knot { x: m[0], y: m[1], hin: sub2(p012, m), hout: sub2(p123, m), smooth: true },
+        );
+        Some(i + 1)
+    }
+
+    /// Удалить внутренний узел (крайние неудаляемы).
+    pub fn remove(&mut self, i: usize) {
+        if i > 0 && i + 1 < self.knots.len() {
+            self.knots.remove(i);
+        }
+    }
+
+    /// Сдвинуть узел в (x, y): крайние ходят только по y, внутренние — между
+    /// соседями (с зазором). Ручки едут вместе с узлом.
+    pub fn move_knot(&mut self, i: usize, x: f32, y: f32) {
+        let n = self.knots.len();
+        if i > 0 && i + 1 < n {
+            let lo = self.knots[i - 1].x + KNOT_GAP;
+            let hi = self.knots[i + 1].x - KNOT_GAP;
+            self.knots[i].x = x.clamp(lo, hi.max(lo));
+        }
+        self.knots[i].y = y.clamp(0.0, 1.0);
+    }
+
+    /// Поставить ручку узла `i` в точку `pos` (`out` — исходящая). У гладкого
+    /// узла противоположная ручка поворачивается на ту же прямую, сохраняя
+    /// длину; `break_smooth` (Alt) делает узел угловым.
+    pub fn set_handle(&mut self, i: usize, out: bool, pos: P2, break_smooth: bool) {
+        let k = &mut self.knots[i];
+        let mut v = sub2(pos, [k.x, k.y]);
+        v[0] = if out { v[0].max(0.0) } else { v[0].min(0.0) };
+        if break_smooth {
+            k.smooth = false;
+        }
+        let other = if out { k.hin } else { k.hout };
+        if out {
+            k.hout = v;
+        } else {
+            k.hin = v;
+        }
+        let len_v = v[0].hypot(v[1]);
+        if k.smooth && len_v > 1.0e-6 {
+            let len_o = other[0].hypot(other[1]);
+            let mirrored = [-v[0] / len_v * len_o, -v[1] / len_v * len_o];
+            if out {
+                k.hin = mirrored;
+            } else {
+                k.hout = mirrored;
+            }
+        }
+    }
+
+    /// Переключить гладкость узла. Ставший гладким узел выравнивает входящую
+    /// ручку по исходящей (длины сохраняются).
+    pub fn toggle_smooth(&mut self, i: usize) {
+        let k = &mut self.knots[i];
+        k.smooth = !k.smooth;
+        if k.smooth {
+            let (o, len_i) = (k.hout, k.hin[0].hypot(k.hin[1]));
+            let len_o = o[0].hypot(o[1]);
+            if len_o > 1.0e-6 {
+                k.hin = [-o[0] / len_o * len_i, -o[1] / len_o * len_i];
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn linear_is_identity() {
+        let c = CurveShape::linear();
+        for j in 0..=100 {
+            let x = j as f32 / 100.0;
+            assert!((c.eval(x) - x).abs() < 1e-5, "x={x} y={}", c.eval(x));
+        }
+    }
+
+    #[test]
+    fn insert_keeps_shape() {
+        let mut c = CurveShape::linear();
+        c.set_handle(0, true, [0.1, 0.9], false);
+        let before: Vec<f32> = (0..=50).map(|j| c.eval(j as f32 / 50.0)).collect();
+        let i = c.insert_at(0.4);
+        assert_eq!(i, Some(1));
+        for (j, y0) in before.iter().enumerate() {
+            let y1 = c.eval(j as f32 / 50.0);
+            assert!((y1 - y0).abs() < 1e-4, "j={j}: {y0} → {y1}");
+        }
+    }
+
+    #[test]
+    fn extreme_handles_keep_x_monotone() {
+        // Ручки, вытянутые далеко за сегмент, ужимаются: x(t) монотонна,
+        // кривая — функция velocity.
+        let mut c = CurveShape::linear();
+        c.knots[0].hout = [5.0, 3.0];
+        c.knots[1].hin = [-7.0, -0.2];
+        let p = c.seg(0);
+        let mut prev = -1.0f32;
+        for j in 0..=1000 {
+            let x = bez(&p, j as f32 / 1000.0)[0];
+            assert!(x >= prev - 1e-6, "x(t) убывает на j={j}");
+            prev = x;
+        }
+    }
+
+    #[test]
+    fn normalize_repairs_broken_shapes() {
+        // Узлы не по порядку, края не на 0/1, y вне квадрата, NaN — чинится.
+        let mut c = CurveShape::linear();
+        c.knots[0].x = 0.3;
+        c.knots[1].x = 0.1;
+        c.knots[1].y = 4.0;
+        c.normalize();
+        assert_eq!(c.knots[0].x, 0.0);
+        assert_eq!(c.knots[1].x, 1.0);
+        assert!(c.knots.iter().all(|k| (0.0..=1.0).contains(&k.y)));
+        let mut bad = CurveShape::linear();
+        bad.knots[0].hout[1] = f32::NAN;
+        bad.normalize();
+        assert_eq!(bad, CurveShape::linear());
+    }
+
+    #[test]
+    fn edge_knots_move_only_vertically_and_remove_keeps_ends() {
+        let mut c = CurveShape::linear();
+        c.move_knot(0, 0.5, 0.2);
+        assert_eq!(c.pt(0), [0.0, 0.2]);
+        c.remove(0);
+        c.remove(1);
+        assert_eq!(c.knots.len(), 2);
+        let i = c.insert_at(0.5).unwrap();
+        c.move_knot(i, 2.0, 0.5);
+        assert!(c.knots[i].x <= 1.0 - KNOT_GAP);
+        c.remove(i);
+        assert_eq!(c.knots.len(), 2);
+    }
+}
