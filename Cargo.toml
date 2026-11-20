@@ -11,8 +11,9 @@ categories = ["multimedia::audio::plugins"]
 
 [dependencies]
 # VST plugin dependencies
-nih_plug = { git = "https://github.com/robbert-vdh/nih-plug", features = ["vst3", "standalone"] }
-nih_plug_egui = { git = "https://github.com/robbert-vdh/nih-plug" }
+# Ревизия зафиксирована явно (Cargo.lock фиксирует её же).
+nih_plug = { git = "https://github.com/robbert-vdh/nih-plug", rev = "28b149ec4d62757d0b448809148a0c3ca6e09a95", features = ["vst3"] }
+nih_plug_egui = { git = "https://github.com/robbert-vdh/nih-plug", rev = "28b149ec4d62757d0b448809148a0c3ca6e09a95" }
 
 # GUI dependencies for standalone
 eframe = { version = "0.28", default-features = false, features = ["glow"] }
@@ -21,10 +22,8 @@ egui = "0.28"
 # Common dependencies
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-kurbo = "0.11"
 
-# MIDI dependencies (for future versions)
-cpal = "0.15"  # For audio/MIDI IO
+# MIDI dependencies
 midir = "0.8"  # For MIDI ports
 
 # Additional dependencies
@@ -48,10 +47,3 @@ lto = "fat"
 opt-level = 3
 codegen-units = 1
 panic = "abort"
-
-# Cross-compilation targets
-[target.'cfg(windows)'.dependencies]
-winapi = { version = "0.3", features = ["winuser"] }
-
-[target.'cfg(target_os = "macos")'.dependencies]
-core-foundation = "0.9"
