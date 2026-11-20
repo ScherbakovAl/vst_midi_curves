@@ -1,22 +1,16 @@
-//! Модуль для работы с кривыми Безье и обработкой MIDI velocity
+//! Кривые velocity: форма ([`shape`]), таблицы потока MIDI ([`bank`]),
+//! миграция старого формата ([`legacy`]).
 //!
 //! Copyright (c) 2025 Scherbakov Alexey <scherbakov.al@gmail.com>
 //! Licensed under the MIT License
 
-pub mod bezier;
-pub mod interpolation;
-pub mod control_point;
-pub mod dual_curve;
-pub mod shape;
 pub mod bank;
 pub mod legacy;
+pub mod shape;
 
-pub use bezier::BezierCurve;
-pub use control_point::ControlPoint;
-pub use interpolation::{cubic_bezier};
-pub use dual_curve::DualCurve;
-pub use shape::{CurveShape, Knot};
 pub use bank::{CurveBank, Slot, LUT_N};
+pub use shape::{CurveShape, Knot};
+
 /// Обе кривые и формат выхода — то, что хранится в проекте DAW (плагин) и в
 /// `settings.json` (standalone).
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]

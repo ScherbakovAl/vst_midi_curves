@@ -63,6 +63,9 @@ struct CurveView {
     /// Ломаная в единичном квадрате и форма, по которой она посчитана.
     poly: Vec<[f32; 2]>,
     poly_of: Option<CurveShape>,
+    /// Квадрат графика на экране в последнем кадре (для тестов жестов).
+    #[cfg(test)]
+    rect: Option<Rect>,
 }
 
 impl CurveView {
@@ -435,6 +438,10 @@ fn curve_editor(
     let avail = ui.available_size();
     let (resp, painter) = ui.allocate_painter(avail, egui::Sense::click_and_drag());
     let pr = Rect::from_min_max(resp.rect.min + egui::vec2(40.0, 10.0), resp.rect.max - egui::vec2(12.0, 26.0));
+    #[cfg(test)]
+    {
+        st.rect = Some(pr);
+    }
     let to_s = |u: [f32; 2]| Pos2::new(pr.left() + u[0] * pr.width(), pr.bottom() - u[1] * pr.height());
     let to_u = |p: Pos2| [(p.x - pr.left()) / pr.width(), (pr.bottom() - p.y) / pr.height()];
     if st.sel.is_some_and(|i| i >= shape.knots.len()) {
@@ -702,5 +709,136 @@ mod tests {
             n += 1;
         }
         assert_eq!(n, HISTORY_DEPTH);
+    }
+
+    /// Окно без экрана: кадры egui с синтетическим вводом.
+    struct Harness {
+        ctx: egui::Context,
+        ui: CurvesUi,
+        set: CurveSet,
+        bank: CurveBank,
+        t: f64,
+    }
+
+    impl Harness {
+        fn new() -> Self {
+            let set = CurveSet::default();
+            let mut h = Self {
+                ctx: egui::Context::default(),
+                ui: CurvesUi::new(&set, Slot::NoteOn, Library::new(None)),
+                set,
+                bank: CurveBank::new(),
+                t: 0.0,
+            };
+            h.frame(vec![], egui::Modifiers::NONE);
+            h.frame(vec![], egui::Modifiers::NONE);
+            h
+        }
+
+        fn frame(&mut self, events: Vec<egui::Event>, modifiers: egui::Modifiers) -> Outcome {
+            let raw = egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(1000.0, 640.0))),
+                events,
+                modifiers,
+                time: Some(self.t),
+                ..Default::default()
+            };
+            self.t += 1.0 / 60.0;
+            let mut out = Outcome::default();
+            let _ = self.ctx.run(raw, |ctx| out = self.ui.show(ctx, &mut self.set, &self.bank, |_| {}));
+            out
+        }
+
+        /// Точка единичного квадрата → экран.
+        fn at(&self, u: [f32; 2]) -> Pos2 {
+            let r = self.ui.views[self.ui.tab.idx()].rect.unwrap();
+            Pos2::new(r.left() + u[0] * r.width(), r.bottom() - u[1] * r.height())
+        }
+
+        fn button(&mut self, p: Pos2, button: egui::PointerButton, pressed: bool) -> Outcome {
+            let e = egui::Event::PointerButton { pos: p, button, pressed, modifiers: egui::Modifiers::NONE };
+            self.frame(vec![e], egui::Modifiers::NONE)
+        }
+
+        /// Клик; накопленный `Outcome` всех кадров, включая отпускание.
+        fn click(&mut self, p: Pos2, button: egui::PointerButton) -> Outcome {
+            let mut acc = self.frame(vec![egui::Event::PointerMoved(p)], egui::Modifiers::NONE);
+            for o in [self.button(p, button, true), self.button(p, button, false), self.frame(vec![], egui::Modifiers::NONE)] {
+                acc = merge(acc, o);
+            }
+            acc
+        }
+
+        fn drag(&mut self, from: Pos2, to: Pos2) -> Outcome {
+            let mut acc = self.frame(vec![egui::Event::PointerMoved(from)], egui::Modifiers::NONE);
+            acc = merge(acc, self.button(from, egui::PointerButton::Primary, true));
+            for j in 1..=10 {
+                let p = from + (to - from) * (j as f32 / 10.0);
+                acc = merge(acc, self.frame(vec![egui::Event::PointerMoved(p)], egui::Modifiers::NONE));
+            }
+            acc = merge(acc, self.button(to, egui::PointerButton::Primary, false));
+            merge(acc, self.frame(vec![], egui::Modifiers::NONE))
+        }
+
+        fn key(&mut self, key: egui::Key, modifiers: egui::Modifiers) -> Outcome {
+            let ev = |pressed| egui::Event::Key { key, physical_key: None, pressed, repeat: false, modifiers };
+            let a = self.frame(vec![ev(true)], modifiers);
+            merge(a, self.frame(vec![ev(false)], egui::Modifiers::NONE))
+        }
+    }
+
+    fn merge(a: Outcome, b: Outcome) -> Outcome {
+        Outcome {
+            shape: [a.shape[0] || b.shape[0], a.shape[1] || b.shape[1]],
+            hi_res: a.hi_res || b.hi_res,
+            tab: a.tab || b.tab,
+            committed: a.committed || b.committed,
+        }
+    }
+
+    #[test]
+    fn click_on_curve_adds_knot_without_changing_shape() {
+        let mut h = Harness::new();
+        let before: Vec<f32> = (0..=20).map(|j| h.set.note_on.eval(j as f32 / 20.0)).collect();
+        let out = h.click(h.at([0.5, 0.5]), egui::PointerButton::Primary);
+        assert_eq!(h.set.note_on.knots.len(), 3);
+        assert!(out.shape[0] && out.committed && !out.shape[1]);
+        for (j, y0) in before.iter().enumerate() {
+            assert!((h.set.note_on.eval(j as f32 / 20.0) - y0).abs() < 1e-4);
+        }
+        assert!(h.ui.hist[0].can_undo());
+    }
+
+    #[test]
+    fn drag_knot_then_undo_redo_and_delete() {
+        let mut h = Harness::new();
+        h.click(h.at([0.5, 0.5]), egui::PointerButton::Primary);
+        let inserted = h.set.note_on.clone();
+        let out = h.drag(h.at([0.5, 0.5]), h.at([0.5, 0.8]));
+        assert!(out.shape[0] && out.committed);
+        let k = h.set.note_on.knots[1];
+        assert!((k.y - 0.8).abs() < 0.02 && (k.x - 0.5).abs() < 0.02, "узел {k:?}");
+        let dragged = h.set.note_on.clone();
+        h.key(egui::Key::Z, egui::Modifiers::CTRL);
+        assert_eq!(h.set.note_on, inserted);
+        h.key(egui::Key::Z, egui::Modifiers::CTRL | egui::Modifiers::SHIFT);
+        assert_eq!(h.set.note_on, dragged);
+        // ПКМ по узлу — удалить; крайние узлы неудаляемы.
+        h.click(h.at([0.5, k.y]), egui::PointerButton::Secondary);
+        assert_eq!(h.set.note_on.knots.len(), 2);
+        h.click(h.at([0.0, 0.0]), egui::PointerButton::Secondary);
+        assert_eq!(h.set.note_on.knots.len(), 2);
+    }
+
+    #[test]
+    fn tabs_edit_their_own_curve() {
+        let mut h = Harness::new();
+        h.ui.tab = Slot::NoteOff;
+        h.frame(vec![], egui::Modifiers::NONE);
+        let out = h.drag(h.at([1.0, 1.0]), h.at([1.0, 0.6]));
+        assert!(out.shape[1] && !out.shape[0]);
+        assert!((h.set.note_off.knots[1].y - 0.6).abs() < 0.02);
+        assert_eq!(h.set.note_on, CurveShape::linear());
+        assert!(!h.ui.hist[0].can_undo() && h.ui.hist[1].can_undo());
     }
 }

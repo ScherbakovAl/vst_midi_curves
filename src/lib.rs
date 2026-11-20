@@ -12,6 +12,7 @@
 pub mod curve;
 pub mod editor;
 pub mod library;
+pub mod settings;
 pub mod velocity;
 
 /// egui той же версии, что у nih_plug_egui (её же использует standalone).
