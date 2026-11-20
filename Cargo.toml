@@ -1,6 +1,57 @@
 [package]
 name = "vst_midi_curves"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
+authors = ["Scherbakov Alexey <scherbakov.al@gmail.com>"]
+description = "VST3 plugin for MIDI velocity processing with customizable Bezier curves"
+license = "MIT"
+repository = "https://github.com/yourusername/vst_midi_curves"
+keywords = ["vst3", "midi", "plugin", "rust", "daw"]
+categories = ["multimedia::audio::plugins"]
 
 [dependencies]
+# VST plugin dependencies
+nih_plug = { git = "https://github.com/robbert-vdh/nih-plug", features = ["vst3", "standalone"] }
+nih_plug_egui = { git = "https://github.com/robbert-vdh/nih-plug" }
+
+# GUI dependencies for standalone
+eframe = { version = "0.28", default-features = false, features = ["glow"] }
+egui = "0.28"
+
+# Common dependencies
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+kurbo = "0.11"
+
+# MIDI dependencies (for future versions)
+cpal = "0.15"  # For audio/MIDI IO
+midir = "0.8"  # For MIDI ports
+
+# Additional dependencies
+dirs = "5.0"   # For working with configuration directories
+
+[dev-dependencies]
+tempfile = "3.0"   # For temporary files in tests
+
+# VST3 plugin library
+[lib]
+name = "vst_midi_curves"
+crate-type = ["cdylib", "rlib"]
+
+# Standalone application
+[[bin]]
+name = "midi_curves"
+path = "src/main.rs"
+
+[profile.release]
+lto = "fat"
+opt-level = 3
+codegen-units = 1
+panic = "abort"
+
+# Cross-compilation targets
+[target.'cfg(windows)'.dependencies]
+winapi = { version = "0.3", features = ["winuser"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-foundation = "0.9"

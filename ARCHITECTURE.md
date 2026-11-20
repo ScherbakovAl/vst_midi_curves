@@ -1,80 +1,80 @@
-# Архитектура VST MIDI Curves Plugin
+# VST MIDI Curves Plugin Architecture
 
-## 📋 Описание проекта
+## 📋 Project Description
 
-Кроссплатформенный VST3-плагин и standalone-приложение на Rust для обработки MIDI-сообщений с использованием настраиваемых кривых передаточных функций (подобно кривым в Photoshop).
+Cross-platform VST3 plugin and standalone application in Rust for MIDI message processing using customizable transfer function curves (similar to curves in Photoshop).
 
-### Основные возможности:
-- ✅ Мультиплатформенность (Windows, macOS, Linux)
-- ✅ VST3 плагин + standalone приложение
-- ✅ MIDI вход/выход с обработкой velocity
-- ✅ Интерактивный график с кривыми Безье
-- ✅ Редактирование кривой перетаскиванием управляющих точек
-- ✅ Добавление/удаление контрольных точек
-- ✅ Сохранение и загрузка пресетов
+### Key Features:
+- ✅ Cross-platform (Windows, macOS, Linux)
+- ✅ VST3 plugin + standalone application
+- ✅ MIDI input/output with velocity processing
+- ✅ Interactive graph with Bézier curves
+- ✅ Curve editing by dragging control points
+- ✅ Adding/removing control points
+- ✅ Preset save and load
 
 ---
 
-## 🛠️ Технологический стек
+## 🛠️ Technology Stack
 
-### 1. Основной фреймворк плагина
+### 1. Main Plugin Framework
 **[nih-plug](https://github.com/robbert-vdh/nih-plug)** v0.5+
-- Современный фреймворк для создания VST3 плагинов на Rust
-- Поддержка standalone-режима из коробки
-- Отличная интеграция с egui
-- Автоматическая сериализация параметров
-- Кроссплатформенная компиляция
+- Modern framework for creating VST3 plugins in Rust
+- Built-in standalone mode support
+- Excellent egui integration
+- Automatic parameter serialization
+- Cross-platform compilation
 
-**Почему nih-plug?**
-- Активная разработка и поддержка
-- Отличная документация и примеры
-- Встроенная поддержка MIDI
-- Минимальный boilerplate код
-- Автоматическая генерация VST3 метаданных
+**Why nih-plug?**
+- Active development and support
+- Excellent documentation and examples
+- Built-in MIDI support
+- Minimal boilerplate code
+- Automatic VST3 metadata generation
 
-### 2. GUI фреймворк
+### 2. GUI Framework
 **[egui](https://github.com/emilk/egui)** v0.28+
-- Immediate mode GUI для Rust
-- Отличная производительность
-- Простой и интуитивный API
-- Встроенная поддержка интерактивных графиков
+- Immediate mode GUI for Rust
+- Excellent performance
+- Simple and intuitive API
+- Built-in support for interactive graphs
 
-**[egui_plot](https://docs.rs/egui_plot/)** - для графиков
-- Модуль egui для отрисовки графиков
-- Поддержка интерактивности
-- Оптимизирован для real-time обновлений
+**[egui_plot](https://docs.rs/egui_plot/)** - for graphs
+- Egui module for graph rendering
+- Interactivity support
+- Optimized for real-time updates
 
-### 3. Математика кривых Безье
+### 3. Bézier Curve Mathematics
 **[kurbo](https://github.com/linebender/kurbo)** v0.11+
-- Высокопроизводительная библиотека 2D кривых
-- Поддержка кубических кривых Безье
-- Оптимизированные алгоритмы вычислений
-- Интеграция с egui для отрисовки
+- High-performance 2D curve library
+- Cubic Bézier curve support
+- Optimized computation algorithms
+- Integration with egui for rendering
 
-**Альтернатива:** Собственная реализация на основе:
+**Alternative:** Custom implementation based on:
 ```rust
-// Кубическая кривая Безье: B(t) = (1-t)³P₀ + 3(1-t)²tP₁ + 3(1-t)t²P₂ + t³P₃
+// Cubic Bézier curve: B(t) = (1-t)³P₀ + 3(1-t)²tP₁ + 3(1-t)t²P₂ + t³P₃
 ```
 
-### 4. MIDI обработка
-**Встроенные типы nih-plug:**
-- `NoteEvent` - для MIDI событий
-- Автоматическая обработка MIDI буферов
-- Низкая латентность
+### 4. MIDI Processing
+**Built-in nih-plug types:**
+- `NoteEvent` - for MIDI events
+- Automatic MIDI buffer processing
+- Low latency
 
-### 5. Сериализация
-**[serde](https://serde.rs/)** v1.0+ с **serde_json**
-- Сохранение/загрузка пресетов
-- Автоматическая сериализация состояния плагина
+### 5. Serialization
+**[serde](https://serde.rs/)** v1.0+ with **serde_json**
+- Preset save/load
+- Automatic plugin state serialization
 
-### 6. Математические утилиты
-**[nalgebra](https://nalgebra.org/)** v0.33+ (опционально)
-- Для сложных векторных операций
-- Оптимизированные матричные вычисления
+### 6. Mathematical Utilities
+**[nalgebra](https://nalgebra.org/)** v0.33+ (optional)
+- For complex vector operations
+- Optimized matrix computations
 
 ---
 
-## 🏗️ Архитектура приложения
+## 🏗️ Application Architecture
 
 ```mermaid
 graph TB
@@ -100,7 +100,7 @@ graph TB
     style F fill:#ffa8d5
 ```
 
-### Компонентная структура
+### Component Structure
 
 #### 1. **Plugin Core** (`src/lib.rs`)
 ```rust
@@ -120,7 +120,7 @@ pub struct CurveProcessor {
 
 impl CurveProcessor {
     fn process_velocity(&self, input: u8) -> u8 {
-        // Применение кривой к velocity
+        // Apply curve to velocity
     }
 }
 ```
@@ -133,7 +133,7 @@ pub struct BezierCurve {
 
 pub struct ControlPoint {
     position: Vec2,
-    handles: (Vec2, Vec2), // Входящая и исходящая касательные
+    handles: (Vec2, Vec2), // Incoming and outgoing tangents
 }
 ```
 
@@ -148,45 +148,45 @@ pub struct MidiCurvesEditor {
 
 ---
 
-## 📂 Структура проекта
+## 📂 Project Structure
 
 ```
 vst_midi_curves/
-├── Cargo.toml                  # Зависимости и метаданные
-├── ARCHITECTURE.md             # Этот файл
-├── README.md                   # Документация пользователя
+├── Cargo.toml                  # Dependencies and metadata
+├── ARCHITECTURE.md             # This file
+├── README.md                   # User documentation
 ├── src/
-│   ├── lib.rs                  # Основной файл плагина
-│   ├── editor.rs               # GUI редактор
+│   ├── lib.rs                  # Main plugin file
+│   ├── editor.rs               # GUI editor
 │   ├── curve/
-│   │   ├── mod.rs              # Модуль кривых
-│   │   ├── bezier.rs           # Математика Безье
-│   │   ├── control_point.rs   # Управляющие точки
-│   │   └── interpolation.rs   # Интерполяция
+│   │   ├── mod.rs              # Curves module
+│   │   ├── bezier.rs           # Bézier mathematics
+│   │   ├── control_point.rs   # Control points
+│   │   └── interpolation.rs   # Interpolation
 │   ├── processor/
-│   │   ├── mod.rs              # MIDI процессор
-│   │   └── velocity_curve.rs  # Обработка velocity
+│   │   ├── mod.rs              # MIDI processor
+│   │   └── velocity_curve.rs  # Velocity processing
 │   ├── gui/
-│   │   ├── mod.rs              # GUI модуль
-│   │   ├── canvas.rs           # Canvas для графика
-│   │   ├── interaction.rs     # Обработка взаимодействий
-│   │   └── rendering.rs       # Отрисовка кривой
-│   ├── params.rs               # Параметры плагина
-│   └── presets.rs              # Система пресетов
-├── assets/                     # Ресурсы (иконки, шрифты)
-└── tests/                      # Тесты
+│   │   ├── mod.rs              # GUI module
+│   │   ├── canvas.rs           # Graph canvas
+│   │   ├── interaction.rs     # Interaction handling
+│   │   └── rendering.rs       # Curve rendering
+│   ├── params.rs               # Plugin parameters
+│   └── presets.rs              # Preset system
+├── assets/                     # Resources (icons, fonts)
+└── tests/                      # Tests
     ├── curve_tests.rs
     └── midi_tests.rs
 ```
 
 ---
 
-## 🎯 Детальный план разработки
+## 🎯 Detailed Development Plan
 
-### Этап 1: Настройка проекта (1-2 дня)
+### Phase 1: Project Setup (1-2 days)
 
-#### Задача 1.1: Обновление Cargo.toml
-Добавить все необходимые зависимости:
+#### Task 1.1: Cargo.toml Update
+Add all necessary dependencies:
 
 ```toml
 [package]
@@ -210,17 +210,17 @@ lto = "fat"
 opt-level = 3
 codegen-units = 1
 ```
-**Примечание:** Используется версия nih-plug из git-репозитория, так как версия 0.5 еще не опубликована на crates.io.
+**Note:** Using nih-plug version from git repository, as version 0.5 is not yet published on crates.io.
 
-#### Задача 1.2: Создание базовой структуры
-- Создать модульную структуру проекта
-- Настроить сборку для разных платформ
-- Добавить GitHub Actions для CI/CD (опционально)
+#### Task 1.2: Create Basic Structure
+- Create modular project structure
+- Configure builds for different platforms
+- Add GitHub Actions for CI/CD (optional)
 
-### Этап 2: Базовый плагин (2-3 дня)
+### Phase 2: Basic Plugin (2-3 days)
 
-#### Задача 2.1: Минимальный VST3 плагин
-Создать простейший плагин с nih-plug:
+#### Task 2.1: Minimal VST3 Plugin
+Create a simple plugin with nih-plug:
 
 ```rust
 // src/lib.rs
@@ -256,14 +256,14 @@ impl Plugin for MidiCurvesPlugin {
         self.params.clone()
     }
 
-    // ... остальные методы
+    // ... other methods
 }
 
 nih_plug::nih_export_vst3!(MidiCurvesPlugin);
 ```
 
-#### Задача 2.2: MIDI pass-through
-Реализовать простое пропускание MIDI без обработки:
+#### Task 2.2: MIDI pass-through
+Implement simple MIDI pass-through without processing:
 
 ```rust
 impl Plugin for MidiCurvesPlugin {
@@ -272,7 +272,7 @@ impl Plugin for MidiCurvesPlugin {
         while let Some(event) = context.next_event() {
             match event {
                 NoteEvent::NoteOn { note, velocity, .. } => {
-                    // Пока просто пропускаем
+                    // For now just pass through
                     context.send_event(event);
                 }
                 _ => context.send_event(event),
@@ -285,16 +285,16 @@ impl Plugin for MidiCurvesPlugin {
 
 ---
 
-### Этап 3: Математическая модель кривых (3-4 дня)
+### Phase 3: Mathematical Curve Model (3-4 days)
 
-#### Задача 3.1: Базовая структура кривой Безье
+#### Task 3.1: Basic Bézier Curve Structure
 ```rust
 // src/curve/bezier.rs
 use kurbo::{BezierPath, Point, Vec2};
 
 pub struct BezierCurve {
     control_points: Vec<ControlPoint>,
-    cached_lut: Vec<Point>, // Look-up table для оптимизации
+    cached_lut: Vec<Point>, // Look-up table for optimization
 }
 
 pub struct ControlPoint {
@@ -305,7 +305,7 @@ pub struct ControlPoint {
 
 impl BezierCurve {
     pub fn new() -> Self {
-        // Инициализация с линейной кривой (y = x)
+        // Initialize with linear curve (y = x)
         Self {
             control_points: vec![
                 ControlPoint::new(Point::new(0.0, 0.0)),
@@ -316,29 +316,29 @@ impl BezierCurve {
     }
 
     pub fn evaluate(&self, x: f32) -> f32 {
-        // Вычисление значения кривой в точке x
-        // Использование LUT для оптимизации
+        // Compute curve value at point x
+        // Use LUT for optimization
     }
 
     pub fn add_control_point(&mut self, position: Point) {
-        // Добавление новой точки с автоматическими касательными
+        // Add new point with automatic tangents
     }
 
     pub fn remove_control_point(&mut self, index: usize) {
-        // Удаление точки (кроме первой и последней)
+        // Remove point (except first and last)
     }
 
     pub fn update_control_point(&mut self, index: usize, position: Point) {
-        // Обновление позиции точки
+        // Update point position
     }
 
     fn rebuild_lut(&mut self) {
-        // Перестроение таблицы значений для быстрого доступа
+        // Rebuild value table for fast access
     }
 }
 ```
 
-#### Задача 3.2: Алгоритм интерполяции
+#### Task 3.2: Interpolation Algorithm
 ```rust
 // src/curve/interpolation.rs
 pub fn cubic_bezier(t: f32, p0: f32, p1: f32, p2: f32, p3: f32) -> f32 {
@@ -352,22 +352,22 @@ pub fn cubic_bezier(t: f32, p0: f32, p1: f32, p2: f32, p3: f32) -> f32 {
 }
 
 pub fn find_x_for_t(curve: &BezierCurve, x_target: f32) -> f32 {
-    // Бинарный поиск значения t для данного x
-    // Ньютон-Рафсон для точного решения
+    // Binary search for t value for given x
+    // Newton-Raphson for exact solution
 }
 ```
 
-#### Задача 3.3: Оптимизация с Look-Up Table
-Создать предварительно вычисленную таблицу для real-time обработки:
-- 128 значений (0-127 для MIDI velocity)
-- Обновление при изменении кривой
-- Линейная интерполяция между значениями
+#### Task 3.3: Look-Up Table Optimization
+Create pre-computed table for real-time processing:
+- 128 values (0-127 for MIDI velocity)
+- Update when curve changes
+- Linear interpolation between values
 
 ---
 
-### Этап 4: Интеграция MIDI обработки (2 дня)
+### Phase 4: MIDI Processing Integration (2 days)
 
-#### Задача 4.1: Velocity Processor
+#### Task 4.1: Velocity Processor
 ```rust
 // src/processor/velocity_curve.rs
 pub struct VelocityCurveProcessor {
@@ -383,7 +383,7 @@ impl VelocityCurveProcessor {
 }
 ```
 
-#### Задача 4.2: Интеграция в плагин
+#### Task 4.2: Plugin Integration
 ```rust
 impl Plugin for MidiCurvesPlugin {
     fn process(&mut self, buffer: &mut Buffer, context: &mut impl ProcessContext<Self>) 
@@ -412,9 +412,9 @@ impl Plugin for MidiCurvesPlugin {
 
 ---
 
-### Этап 5: GUI - Базовый график (3-4 дня)
+### Phase 5: GUI - Basic Graph (3-4 days)
 
-#### Задача 5.1: Egui Editor
+#### Task 5.1: Egui Editor
 ```rust
 // src/editor.rs
 use nih_plug_egui::{create_egui_editor, egui, EguiState};
@@ -425,14 +425,14 @@ pub fn create_editor() -> Option<Box<dyn Editor>> {
         (),
         |egui_ctx, setter, state| {
             egui::CentralPanel::default().show(egui_ctx, |ui| {
-                // GUI код здесь
+                // GUI code here
             });
         },
     )
 }
 ```
 
-#### Задача 5.2: Canvas для графика
+#### Task 5.2: Graph Canvas
 ```rust
 // src/gui/canvas.rs
 use egui::*;
@@ -449,20 +449,20 @@ impl CurveCanvas {
             Sense::click_and_drag(),
         );
 
-        // Отрисовка сетки
+        // Draw grid
         self.draw_grid(&painter, response.rect);
         
-        // Отрисовка кривой
+        // Draw curve
         self.draw_curve(&painter, response.rect);
         
-        // Отрисовка контрольных точек
+        // Draw control points
         self.draw_control_points(&painter, response.rect);
 
         response
     }
 
     fn draw_grid(&self, painter: &Painter, rect: Rect) {
-        // Отрисовка координатной сетки
+        // Draw coordinate grid
         let grid_color = Color32::from_gray(40);
         
         for i in 0..=10 {
@@ -482,7 +482,7 @@ impl CurveCanvas {
     }
 
     fn draw_curve(&self, painter: &Painter, rect: Rect) {
-        // Отрисовка кривой Безье
+        // Draw Bézier curve
         let mut points = Vec::new();
         for i in 0..=100 {
             let t = i as f32 / 100.0;
@@ -499,7 +499,7 @@ impl CurveCanvas {
     }
 
     fn draw_control_points(&self, painter: &Painter, rect: Rect) {
-        // Отрисовка управляющих точек
+        // Draw control points
         for point in &self.curve.control_points {
             let screen_pos = self.world_to_screen(point.position, rect);
             
@@ -509,7 +509,7 @@ impl CurveCanvas {
                 Color32::from_rgb(255, 100, 100),
             );
             
-            // Отрисовка касательных
+            // Draw tangents
             // ...
         }
     }
@@ -532,9 +532,9 @@ impl CurveCanvas {
 
 ---
 
-### Этап 6: Интерактивность (3-4 дня)
+### Phase 6: Interactivity (3-4 days)
 
-#### Задача 6.1: Обработка кликов и перетаскивания
+#### Task 6.1: Click and Drag Handling
 ```rust
 // src/gui/interaction.rs
 pub struct InteractionHandler {
@@ -550,14 +550,14 @@ impl InteractionHandler {
         curve: &mut BezierCurve,
         rect: Rect,
     ) {
-        // Обработка кликов для выбора точки
+        // Handle clicks for point selection
         if response.clicked() {
             if let Some(hover_pos) = response.hover_pos() {
                 self.selected_point = self.find_point_at(hover_pos, curve, rect);
             }
         }
 
-        // Перетаскивание точки
+        // Point dragging
         if response.dragged() {
             if let Some(selected) = self.selected_point {
                 if let Some(hover_pos) = response.hover_pos() {
@@ -567,7 +567,7 @@ impl InteractionHandler {
             }
         }
 
-        // Двойной клик для добавления точки
+        // Double click to add point
         if response.double_clicked() {
             if let Some(hover_pos) = response.hover_pos() {
                 let world_pos = screen_to_world(hover_pos, rect);
@@ -575,7 +575,7 @@ impl InteractionHandler {
             }
         }
 
-        // Правый клик для удаления точки
+        // Right click to delete point
         if response.secondary_clicked() {
             if let Some(hover_pos) = response.hover_pos() {
                 if let Some(point_idx) = self.find_point_at(hover_pos, curve, rect) {
@@ -604,15 +604,15 @@ impl InteractionHandler {
 }
 ```
 
-#### Задача 6.2: Визуальная обратная связь
-- Подсветка точки при наведении
-- Изменение курсора
-- Показ координат при перетаскивании
-- Анимация добавления/удаления точек
+#### Task 6.2: Visual Feedback
+- Point highlight on hover
+- Cursor change
+- Coordinate display during dragging
+- Point addition/deletion animation
 
-#### Задача 6.3: Управление касательными
+#### Task 6.3: Tangent Handling
 ```rust
-// Редактирование касательных точек для тонкой настройки кривой
+// Edit tangent points for fine curve adjustment
 pub fn handle_tangent_editing(
     point: &mut ControlPoint,
     handle_type: HandleType,
@@ -621,7 +621,7 @@ pub fn handle_tangent_editing(
     match handle_type {
         HandleType::In => {
             point.handle_in = new_position;
-            // Опционально: зеркалирование для симметричных касательных
+            // Optionally: mirroring for symmetric tangents
             if point.symmetric_handles {
                 point.handle_out = -new_position;
             }
@@ -638,9 +638,9 @@ pub fn handle_tangent_editing(
 
 ---
 
-### Этап 7: Система пресетов (2 дня)
+### Phase 7: Preset System (2 days)
 
-#### Задача 7.1: Сериализация состояния
+#### Task 7.1: State Serialization
 ```rust
 // src/presets.rs
 use serde::{Deserialize, Serialize};
@@ -676,13 +676,13 @@ impl CurvePreset {
 }
 ```
 
-#### Задача 7.2: UI для пресетов
+#### Task 7.2: Preset UI
 ```rust
-// Добавить в GUI:
-// - Кнопка "Save Preset"
-// - Выпадающий список пресетов
-// - Кнопка "Load Preset"
-// - Встроенные пресеты (Linear, S-curve, Exponential, etc.)
+// Add to GUI:
+// - "Save Preset" button
+// - Preset dropdown list
+// - "Load Preset" button
+// - Built-in presets (Linear, S-curve, Exponential, etc.)
 
 pub fn default_presets() -> Vec<CurvePreset> {
     vec![
@@ -696,36 +696,36 @@ pub fn default_presets() -> Vec<CurvePreset> {
 
 ---
 
-### Этап 8: Оптимизация и полировка (2-3 дня)
+### Phase 8: Optimization and Polish (2-3 days)
 
-#### Задача 8.1: Производительность
-- Профилирование с cargo-flamegraph
-- Оптимизация LUT размера и обновления
-- Минимизация аллокаций в audio thread
-- Векторизация вычислений где возможно
+#### Task 8.1: Performance
+- Profiling with cargo-flamegraph
+- Optimize LUT size and updates
+- Minimize allocations in audio thread
+- Vectorize computations where possible
 
-#### Задача 8.2: Улучшения GUI
+#### Task 8.2: GUI Improvements
 ```rust
-// Дополнительные элементы UI:
-// - Кнопка Reset (сброс к линейной кривой)
+// Additional UI elements:
+// - Reset button (reset to linear curve)
 // - Undo/Redo
-// - Zoom и Pan
-// - Сохранение последнего состояния
-// - Темная/светлая тема
-// - Настройки сетки
+// - Zoom and Pan
+// - Save last state
+// - Dark/light theme
+// - Grid settings
 ```
 
-#### Задача 8.3: Обработка ошибок
-- Валидация кривой (монотонность по X)
-- Обработка некорректных пресетов
-- Graceful degradation при ошибках
-- Логирование для отладки
+#### Task 8.3: Error Handling
+- Curve validation (X monotonicity)
+- Handle invalid presets
+- Graceful degradation on errors
+- Logging for debugging
 
 ---
 
-### Этап 9: Тестирование (2-3 дня)
+### Phase 9: Testing (2-3 days)
 
-#### Задача 9.1: Unit тесты
+#### Task 9.1: Unit Tests
 ```rust
 // tests/curve_tests.rs
 #[cfg(test)]
@@ -755,22 +755,22 @@ mod tests {
 }
 ```
 
-#### Задача 9.2: Интеграционное тестирование
-- Тестирование в разных DAW (Reaper, Ableton, FL Studio)
-- Проверка MIDI routing
-- Тестирование standalone версии
-- Stress testing с большим количеством MIDI событий
+#### Task 9.2: Integration Testing
+- Testing in different DAWs (Reaper, Ableton, FL Studio)
+- Check MIDI routing
+- Test standalone version
+- Stress testing with large MIDI event counts
 
-#### Задача 9.3: Кроссплатформенное тестирование
+#### Task 9.3: Cross-platform Testing
 - Windows 10/11
-- macOS (Intel и Apple Silicon)
-- Linux (различные дистрибутивы)
+- macOS (Intel and Apple Silicon)
+- Linux (various distributions)
 
 ---
 
-### Этап 10: Сборка и дистрибуция (1-2 дня)
+### Phase 10: Build and Distribution (1-2 days)
 
-#### Задача 10.1: Настройка сборки
+#### Task 10.1: Build Configuration
 ```bash
 # Windows
 cargo build --release
@@ -786,39 +786,39 @@ lipo -create target/x86_64-apple-darwin/release/*.dylib \
 cargo build --release --target x86_64-unknown-linux-gnu
 ```
 
-#### Задача 10.2: Документация
-- README с инструкциями по установке
+#### Task 10.2: Documentation
+- README with installation instructions
 - User manual
-- Примеры использования
+- Usage examples
 - Troubleshooting guide
 
 ---
 
-## 🔧 Рекомендации по разработке
+## 🔧 Development Recommendations
 
 ### Best Practices
 
 1. **Audio Thread Safety**
-   - Никогда не аллоцировать память в audio thread
-   - Использовать lock-free структуры данных
-   - Предвычислять значения где возможно
+   - Never allocate memory in audio thread
+   - Use lock-free data structures
+   - Pre-compute values where possible
 
 2. **GUI Performance**
-   - Обновлять GUI только при изменениях
-   - Использовать dirty flags
-   - Кэшировать отрисованные элементы
+   - Update GUI only on changes
+   - Use dirty flags
+   - Cache rendered elements
 
 3. **MIDI Processing**
-   - Всегда учитывать timing MIDI событий
-   - Минимальная латентность
-   - Обрабатывать все типы MIDI сообщений
+   - Always consider MIDI event timing
+   - Minimal latency
+   - Process all types of MIDI messages
 
 4. **Testing**
-   - Писать тесты для критичных функций
-   - Регрессионное тестирование
-   - Профилирование производительности
+   - Write tests for critical functions
+   - Regression testing
+   - Performance profiling
 
-### Структура коммитов
+### Commit Structure
 
 ```
 feat: Add basic Bézier curve implementation
@@ -830,48 +830,48 @@ test: Add curve interpolation tests
 
 ---
 
-## 📚 Дополнительные ресурсы
+## 📚 Additional Resources
 
-### Документация
+### Documentation
 - [NIH-plug Book](https://nih-plug.robbert.vdh.org/)
 - [egui Documentation](https://docs.rs/egui/latest/egui/)
 - [Kurbo Documentation](https://docs.rs/kurbo/latest/kurbo/)
 
-### Примеры проектов
+### Example Projects
 - [NIH-plug Examples](https://github.com/robbert-vdh/nih-plug/tree/master/plugins)
 - [egui Demo App](https://github.com/emilk/egui/tree/master/crates/egui_demo_app)
 
-### Теория
+### Theory
 - [Bézier Curves - Primer](https://pomax.github.io/bezierinfo/)
 - [MIDI Specification](https://www.midi.org/specifications)
 - [VST3 SDK Documentation](https://steinbergmedia.github.io/vst3_doc/)
 
 ---
 
-## 🎯 Временная оценка
+## 🎯 Time Estimates
 
-### Базовая версия (MVP): ~3-4 недели
-- Этапы 1-6: Функционирующий плагин с базовым GUI
+### Basic Version (MVP): ~3-4 weeks
+- Phases 1-6: Functioning plugin with basic GUI
 
-### Полная версия: ~6-8 недель
-- Все этапы включая тестирование и полировку
+### Full Version: ~6-8 weeks
+- All phases including testing and polishing
 
-### Расширенная версия: +2-3 недели
-- Дополнительные фичи (пресеты, расширенный UI, автоматизация)
-
----
-
-## 🚀 Следующие шаги
-
-После одобрения плана:
-
-1. **Подтвердить технологический стек**
-2. **Начать с Этапа 1**: Настройка проекта
-3. **Переключиться в Code Mode** для реализации
-4. **Итеративная разработка** по этапам
+### Extended Version: +2-3 weeks
+- Additional features (presets, extended UI, automation)
 
 ---
 
-**Дата создания:** 2025-10-13  
-**Версия документа:** 1.0  
-**Статус:** Ожидает утверждения
+## 🚀 Next Steps
+
+After plan approval:
+
+1. **Confirm technology stack**
+2. **Start with Phase 1**: Project setup
+3. **Switch to Code Mode** for implementation
+4. **Iterative development** by phases
+
+---
+
+**Creation Date:** 2025-10-13  
+**Document Version:** 1.0  
+**Status:** Awaiting Approval

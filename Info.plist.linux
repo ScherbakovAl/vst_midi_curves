@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleExecutable</key>
+    <string>MidiCurves.so</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.yourcompany.midicurves</string>
+    <key>CFBundleName</key>
+    <string>MIDI Curves</string>
+    <key>CFBundleDisplayName</key>
+    <string>MIDI Curves</string>
+    <key>CFBundleVersion</key>
+    <string>0x01000000</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0.0</string>
+    <key>CFBundleSignature</key>
+    <string>????</string>
+    <key>CFBundlePackageType</key>
+    <string>BNDL</string>
+    <key>VST3</key>
+    <dict>
+        <key>Version</key>
+        <string>0x01000000</string>
+        <key>Name</key>
+        <string>MIDI Curves</string>
+        <key>ID</key>
+        <data>TWlkaUN1cnZlc1ZTVDMhIQ==</data>
+        <key>Category</key>
+        <string>Fx</string>
+        <key>ClassFlags</key>
+        <integer>0</integer>
+        <key>SubCategories</key>
+        <string>Fx|Tools</string>
+        <key>Manufacturer</key>
+        <string>Rust VST Developer</string>
+        <key>Classes</key>
+        <array>
+            <dict>
+                <key>CID</key>
+                <data>TWlkaUN1cnZlc1ZTVDMhIQ==</data>
+                <key>Category</key>
+                <string>kVstAudioEffectClass</string>
+                <key>Name</key>
+                <string>MIDI Curves</string>
+                <key>ClassID</key>
+                <data>TWlkaUN1cnZlc1ZTVDMhIQ==</data>
+                <key>Version</key>
+                <string>0x01000000</string>
+                <key>_sdkVersion</key>
+                <string>VST 3.7.0</string>
+            </dict>
+        </array>
+    </dict>
+</dict>
+</plist>

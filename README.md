@@ -1,8 +1,3 @@
-Main branch: https://github.com/ScherbakovAl/vst_midi_curves/tree/%D0%B4%D0%BE%D0%B1%D0%B0%D0%B2%D0%BB%D0%B5%D0%BD%D0%B8%D0%B5-%D0%BE%D0%B1%D1%80%D0%B0%D0%B1%D0%BE%D1%82%D0%BA%D0%B8-hires-midi
-
-
-
-
 # 🎵 VST3 MIDI Curves - Build and Usage
 
 ## 📄 License
@@ -16,6 +11,12 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ✅ **Cross-platform build** - Windows, macOS, Linux  
 ✅ **Automatic build scripts** - One command for any platform  
 ✅ **Detailed documentation** - BUILD_GUIDE.md with instructions  
+
+
+## 🎥 Video Demo
+
+- **YouTube**: [VST3 MIDI Curves Plugin Demo](https://www.youtube.com/watch?v=CtjtueLHJKM)
+
 
 ## 🚀 Quick Start
 
@@ -86,7 +87,7 @@ vst_midi_curves/
 ### Linux:
 - GTK4 development headers:
   - Ubuntu/Debian: `sudo apt install libgtk-4-dev pkg-config`
-  - Fedora: `sudo dnf install gtk4-devel pkg-config`
+  - Fedora: `sudo dnf install gtk4-devel pkg-config jack-audio-connection-kit-devel mesa-libGL-devel mesa-libGLU-devel alsa-lib-devel`
   - Arch: `sudo pacman -S gtk4 pkg-config`
 
 ## 📦 Build Commands
@@ -153,6 +154,7 @@ sudo apt install libgtk-4-dev libssl-dev libasound2-dev libudev-dev
 - **BUILD_GUIDE.md** - Detailed build instructions
 - **ARCHITECTURE.md** - Project architecture
 - **Cargo.toml** - Configuration and dependencies
+
 
 ## 🎯 Result
 
