@@ -74,7 +74,7 @@ EOF
 make_bundle vst3
 make_bundle clap
 rm "$OUT/MidiCurves.dylib"
-cp README.md BUILD_GUIDE.md LICENSE "$OUT/"
+cp README.md BUILD_GUIDE.md LICENSE licenses/LICENSE-GPL-3.0 "$OUT/"
 
 echo "✅ $OUT/"
 ls -1 "$OUT"

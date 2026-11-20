@@ -5,7 +5,8 @@ echo "🔍 VST3 Plugin MidiCurves Diagnostics"
 echo "========================================"
 echo ""
 
-VST3_PATH="build/midi_curves_v0.1.0/MidiCurves.vst3"
+VERSION=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+VST3_PATH="build/midi_curves_v$VERSION/MidiCurves.vst3"
 
 # 1. Structure verification
 echo "1️⃣ VST3 bundle structure verification:"

@@ -1,5 +1,14 @@
 # MIDI Curves
 
+<!-- DOI: after the first release is archived by Zenodo, put the concept DOI here:
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.NNNNNNN.svg)](https://doi.org/10.5281/zenodo.NNNNNNN) -->
+[![CI](https://github.com/ScherbakovAl/vst_midi_curves/actions/workflows/ci.yml/badge.svg)](https://github.com/ScherbakovAl/vst_midi_curves/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/ScherbakovAl/vst_midi_curves)](https://github.com/ScherbakovAl/vst_midi_curves/releases/latest)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Formats: VST3 | CLAP](https://img.shields.io/badge/formats-VST3%20%7C%20CLAP-blue.svg)](#vst3-or-clap)
+[![Platforms](https://img.shields.io/badge/platforms-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey.svg)](#download)
+[![Rust](https://img.shields.io/badge/Rust-stable-orange.svg?logo=rust)](https://www.rust-lang.org/)
+
 MIDI velocity curves as a **VST3/CLAP plugin** and a **standalone app** (Rust,
 [nih-plug](https://github.com/robbert-vdh/nih-plug) + egui). Every Note On and
 Note Off goes through its own editable Bézier curve, like *Curves* in an image
@@ -56,6 +65,19 @@ notes, so in a chord played in a single sample only the first note gets its own
 LL, and a host may drop a CC88 that repeats the previous value. CLAP delivers
 MIDI events in order and has neither problem.
 
+## Download
+
+Ready builds for Linux (x86_64), macOS (universal: Intel + Apple Silicon) and
+Windows (x86_64): [Releases](https://github.com/ScherbakovAl/vst_midi_curves/releases/latest). Each archive holds
+`MidiCurves.vst3`, `MidiCurves.clap` and the standalone `midi_curves`; where to
+copy them — [BUILD_GUIDE.md](BUILD_GUIDE.md#install). `SHA256SUMS.txt` checks
+the download: `sha256sum -c SHA256SUMS.txt --ignore-missing`.
+
+- Linux: glibc 2.35 or newer (Ubuntu 22.04, Debian 12, Fedora 36 and later).
+- macOS: the build is not signed; after unpacking run
+  `xattr -dr com.apple.quarantine MidiCurves.vst3 MidiCurves.clap midi_curves`
+  (or allow it in System Settings → Privacy & Security).
+
 ## Build
 
 ```bash
@@ -67,7 +89,6 @@ MIDI events in order and has neither problem.
 
 Output: `build/midi_curves_v<version>/` with `MidiCurves.vst3`, `MidiCurves.clap`
 and the standalone `midi_curves`. Details and dependencies: [BUILD_GUIDE.md](BUILD_GUIDE.md).
-Release builds belong in GitHub Releases, not in git.
 
 ## Standalone
 
@@ -92,6 +113,17 @@ cargo build --features assert_process_allocs   # debug plugin that aborts on any
 Tests never touch the real `~/.config` (temporary folders). See
 [ARCHITECTURE.md](ARCHITECTURE.md) for the code map.
 
+## Citation
+
+If you use MIDI Curves in research, please cite it — see
+[CITATION.cff](CITATION.cff) (GitHub: *Cite this repository*).
+
 ## License
 
-MIT — see [LICENSE](LICENSE).
+The source code is MIT — see [LICENSE](LICENSE).
+
+Built binaries (the release archives, and builds you make yourself) also contain
+nih-plug's VST3 bindings ([vst3-sys](https://github.com/RustAudio/vst3-sys)),
+which are GPLv3. So the binaries as a whole are distributed under the
+[GNU GPL v3](licenses/LICENSE-GPL-3.0); their source is this repository at the
+release tag.

@@ -25,7 +25,7 @@ mkdir -p "$OUT/MidiCurves.vst3/Contents/x86_64-win"
 cp "$REL/vst_midi_curves.dll" "$OUT/MidiCurves.vst3/Contents/x86_64-win/MidiCurves.vst3"
 cp "$REL/vst_midi_curves.dll" "$OUT/MidiCurves.clap"
 cp "$REL/midi_curves.exe" "$OUT/"
-cp README.md BUILD_GUIDE.md LICENSE "$OUT/"
+cp README.md BUILD_GUIDE.md LICENSE licenses/LICENSE-GPL-3.0 "$OUT/"
 
 echo "✅ $OUT/"
 echo "Install: MidiCurves.vst3 → C:\\Program Files\\Common Files\\VST3\\"

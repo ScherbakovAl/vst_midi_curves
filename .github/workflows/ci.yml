@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libasound2-dev libx11-dev \
+            libx11-xcb-dev libxcb1-dev libgl-dev
+
+      # The allowed lint fires inside nih_export_vst3! (vst3_com macro of
+      # nih-plug), not in this crate; #[allow] on the macro call does not work.
+      - name: Clippy (all targets)
+        run: >-
+          cargo clippy --locked --all-targets --
+          -D warnings -A semicolon_in_expressions_from_non_local_macros
+
+      - name: Tests
+        run: cargo test --locked

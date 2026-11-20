@@ -1,0 +1,107 @@
+# Release: push a tag vX.Y.Z (equal to `version` in Cargo.toml) →
+# the build scripts run on Linux, Windows and macOS → archives and SHA256SUMS.txt
+# are attached to a DRAFT GitHub Release. Check it and press "Publish":
+# only a published release is archived by Zenodo (DOI).
+# Manual run (workflow_dispatch) only builds the archives (Actions → artifacts).
+
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Older Ubuntu = older glibc (2.35): the binaries also run on older
+          # distributions. A build on a new distribution needs its newer glibc.
+          - os: ubuntu-22.04
+            name: linux-x86_64
+          - os: windows-latest
+            name: windows-x86_64
+          - os: macos-latest
+            name: macos-universal
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ runner.os == 'macOS' && 'x86_64-apple-darwin,aarch64-apple-darwin' || '' }}
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libasound2-dev libx11-dev \
+            libx11-xcb-dev libxcb1-dev libgl-dev
+
+      - name: Version
+        id: ver
+        shell: bash
+        run: |
+          VERSION=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          if [[ "$GITHUB_REF_TYPE" == tag && "$GITHUB_REF_NAME" != "v$VERSION" ]]; then
+            echo "::error::tag $GITHUB_REF_NAME != v$VERSION from Cargo.toml"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Build
+        shell: bash
+        run: |
+          case "$RUNNER_OS" in
+            Linux)   ./build.sh ;;
+            macOS)   ./build_macos.sh ;;
+            Windows) ./build_windows.sh ;;
+          esac
+
+      - name: Package
+        shell: bash
+        run: |
+          V=${{ steps.ver.outputs.version }}
+          NAME=MidiCurves-v$V-${{ matrix.name }}
+          mkdir -p dist
+          case "$RUNNER_OS" in
+            Linux)   tar -C build -czf "dist/$NAME.tar.gz" "midi_curves_v$V" ;;
+            macOS)   (cd build && zip -qry "../dist/$NAME.zip" "midi_curves_v$V") ;;
+            Windows) (cd build && 7z a -tzip "../dist/$NAME.zip" "midi_curves_v${V}_windows") ;;
+          esac
+          ls -l dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: dist/*
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        run: cd dist && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          generate_release_notes: true
+          files: dist/*
+          fail_on_unmatched_files: true

@@ -1,0 +1,29 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it using these metadata."
+title: "MIDI Curves — MIDI velocity curves (VST3/CLAP plugin and standalone app)"
+abstract: >-
+  VST3/CLAP plugin and standalone app that maps the velocity of every MIDI
+  Note On and Note Off through its own editable Bézier curve, like Curves in
+  an image editor. Supports high-resolution (14-bit) velocity via the CC88
+  prefix (MIDI CA-031) on input and output. Realtime path without locks or
+  allocations, O(1) per note.
+type: software
+authors:
+  - family-names: Scherbakov
+    given-names: Alexey
+    alias: ScherbakovAl
+repository-code: "https://github.com/ScherbakovAl/vst_midi_curves"
+url: "https://github.com/ScherbakovAl/vst_midi_curves"
+keywords:
+  - MIDI
+  - velocity curve
+  - high-resolution velocity
+  - CC88
+  - VST3
+  - CLAP
+  - audio plugin
+  - digital piano
+  - Rust
+license: MIT
+version: "0.1.0"
+date-released: "2026-11-21"

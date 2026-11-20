@@ -74,9 +74,32 @@ cargo clippy --all-targets
 
 The only build warning, “trailing semicolon in macro used in expression
 position”, comes from the `vst3_com` macro inside `nih_export_vst3!` (nih-plug),
-not from this crate.
+not from this crate. CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml))
+runs clippy with `-D warnings` and allows only this lint
+(`-A semicolon_in_expressions_from_non_local_macros`), then `cargo test`, on
+Linux, Windows and macOS.
 
 ## Releases
 
-Built files go to GitHub Releases (attach the archive of
-`build/midi_curves_v<version>/`), not into git — `build/` is ignored.
+Built files go to GitHub Releases, not into git — `build/` is ignored. Releases
+are built by GitHub Actions ([`.github/workflows/release.yml`](.github/workflows/release.yml)),
+not on a developer machine: a local Linux build needs the glibc of the
+distribution it was built on (Fedora 44 — 2.43), the CI build on Ubuntu 22.04
+needs only 2.35.
+
+1. Set `version` in `Cargo.toml` (and `version`/`date-released` in
+   `CITATION.cff`), commit.
+2. `git tag v<version> && git push origin v<version>` — the tag must equal the
+   version, otherwise the workflow stops.
+3. The workflow runs `build.sh`, `build_macos.sh` and `build_windows.sh` on their
+   platforms and attaches `MidiCurves-v<version>-{linux-x86_64.tar.gz,
+   macos-universal.zip, windows-x86_64.zip}` and `SHA256SUMS.txt` to a **draft**
+   release.
+4. Check the draft and press *Publish release*. Zenodo archives only published
+   releases and gives each one a DOI.
+
+Windows builds link the C runtime statically ([`.cargo/config.toml`](.cargo/config.toml)):
+no Visual C++ Redistributable is needed.
+
+Every archive also holds `LICENSE-GPL-3.0`: the binaries contain nih-plug's
+GPLv3 VST3 bindings (see *License* in README).

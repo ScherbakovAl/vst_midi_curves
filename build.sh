@@ -33,7 +33,7 @@ cp "$LIB" "$OUT/MidiCurves.vst3/Contents/x86_64-linux/MidiCurves.so"
 cp Info.plist.linux "$OUT/MidiCurves.vst3/Contents/Info.plist"
 cp "$LIB" "$OUT/MidiCurves.clap"
 cp target/release/midi_curves "$OUT/"
-cp README.md BUILD_GUIDE.md LICENSE "$OUT/"
+cp README.md BUILD_GUIDE.md LICENSE licenses/LICENSE-GPL-3.0 "$OUT/"
 
 echo "✅ $OUT/"
 ls -1 "$OUT"
