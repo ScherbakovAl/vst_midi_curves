@@ -195,9 +195,10 @@ impl Plugin for MidiCurvesPlugin {
         create_egui_editor(
             params.editor_state.clone(),
             state,
-            |_ctx, st| {
+            |ctx, st| {
                 // Каждое открытие окна: библиотеку перечитать (её мог менять
                 // standalone), первая секунда — частая перерисовка.
+                crate::editor::setup_fonts(ctx);
                 st.opened = Instant::now();
                 st.ui.rescan_library();
             },

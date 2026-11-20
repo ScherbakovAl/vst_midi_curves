@@ -317,14 +317,23 @@ impl CurvesUi {
         };
         let mut rescan = false;
         let mut load: Option<String> = None;
-        egui::ScrollArea::vertical().max_height(220.0).auto_shrink([false, true]).show(ui, |ui| {
-            for e in &list {
-                let text = if e.file { egui::RichText::new(&e.name) } else { egui::RichText::new(&e.name).italics() };
-                let r = ui.selectable_label(self.lib_name == e.name, text);
-                if r.clicked() {
-                    load = Some(e.name.clone());
-                }
-            }
+        // Рамка и видимая полоса прокрутки: список читается как прокручиваемый,
+        // а не как наезжающий на поле имени.
+        ui.group(|ui| {
+            ui.spacing_mut().scroll = egui::style::ScrollStyle::solid();
+            egui::ScrollArea::vertical()
+                .max_height(220.0)
+                .auto_shrink([false, true])
+                .show(ui, |ui| {
+                    for e in &list {
+                        let text =
+                            if e.file { egui::RichText::new(&e.name) } else { egui::RichText::new(&e.name).italics() };
+                        let r = ui.selectable_label(self.lib_name == e.name, text);
+                        if r.clicked() {
+                            load = Some(e.name.clone());
+                        }
+                    }
+                });
         });
         if let Some(name) = load {
             match self.lib.load(&name) {
@@ -399,6 +408,15 @@ Right/double click a knot — delete; Del — delete selected. \
 Shift — fine (×0.1), Ctrl — snap to 1/16, Alt+drag handle — corner, \
 Alt+click knot — smooth ↔ corner. Ctrl+Z / Ctrl+Shift+Z — undo / redo. \
 Italic presets are built in.";
+
+/// Шрифты: в пропорциональном Ubuntu-Light нет `→` (и прочих стрелок) —
+/// запасным ставится встроенный в egui моноширинный Hack.
+pub fn setup_fonts(ctx: &egui::Context) {
+    let mut fonts = egui::FontDefinitions::default();
+    let hack = fonts.families[&egui::FontFamily::Monospace][0].clone();
+    fonts.families.entry(egui::FontFamily::Proportional).or_default().push(hack);
+    ctx.set_fonts(fonts);
+}
 
 /// Velocity 0…1 в подписи: 7 бит и 14 бит.
 fn fmt_vel(v: f32) -> String {
@@ -670,6 +688,18 @@ fn curve_editor(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Все символы подписей GUI есть в шрифтах (иначе — «квадратики»).
+    #[test]
+    fn gui_glyphs_present() {
+        let ctx = egui::Context::default();
+        setup_fonts(&ctx);
+        let _ = ctx.run(Default::default(), |_| {});
+        let text = format!("— none — → ↔ × «» … ≈ · {HELP}");
+        let font = egui::FontId::proportional(11.0);
+        let missing: String = ctx.fonts(|f| text.chars().filter(|&c| !f.has_glyph(&font, c)).collect());
+        assert!(missing.is_empty(), "нет глифов: {missing:?}");
+    }
 
     fn bent() -> CurveShape {
         let mut s = CurveShape::linear();

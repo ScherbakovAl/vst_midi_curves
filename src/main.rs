@@ -78,7 +78,8 @@ impl App {
 fn port_combo(ui: &mut egui::Ui, id: &str, current: &Option<String>, ports: &[String]) -> Option<Option<String>> {
     let mut pick = None;
     let text = current.as_deref().unwrap_or("— none —");
-    egui::ComboBox::from_id_salt(id).width(190.0).selected_text(text).show_ui(ui, |ui| {
+    // `truncate`: длинное имя порта не раздвигает боковую панель.
+    egui::ComboBox::from_id_salt(id).width(190.0).truncate().selected_text(text).show_ui(ui, |ui| {
         if ui.selectable_label(current.is_none(), "— none —").clicked() {
             pick = Some(None);
         }
@@ -196,6 +197,7 @@ fn main() -> Result<(), eframe::Error> {
         "MIDI Curves",
         options,
         Box::new(move |cc| {
+            vst_midi_curves::editor::setup_fonts(&cc.egui_ctx);
             spawn_repaint_watcher(cc.egui_ctx.clone(), bank);
             spawn_port_watcher(cc.egui_ctx.clone(), midi);
             Ok(Box::new(app))
