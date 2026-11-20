@@ -6,6 +6,10 @@ Note Off goes through its own editable Bézier curve, like *Curves* in an image
 editor. High-resolution (14-bit) velocity via the CC88 prefix is supported on
 input and output.
 
+![MIDI Curves standalone: Note On curve with the last note marker, MIDI ports and presets](img/standalone.png)
+
+*Standalone app. The plugin shows the same editor without the MIDI panel.*
+
 Video demo (older version): [YouTube](https://www.youtube.com/watch?v=CtjtueLHJKM)
 
 ## Features
@@ -22,7 +26,9 @@ Video demo (older version): [YouTube](https://www.youtube.com/watch?v=CtjtueLHJK
 - Everything else (CC, pitch bend, aftertouch, SysEx, clock) passes unchanged.
 - Shared preset folder for the plugin and the app:
   `~/.config/vst_midi_curves/presets` (macOS: `~/Library/Application Support/…`,
-  Windows: `%APPDATA%\…`). Italic entries are built in.
+  Windows: `%APPDATA%\…`). Italic entries are built in. A click loads a preset
+  into the open tab; *Save* / *Overwrite* writes the current curve under the typed
+  name, *Delete* removes the file (click twice), *Rescan* re-reads the folder.
 - Plugin state (both curves, output format, open tab) is saved in the DAW project.
 - Realtime path: no locks, no allocations, O(1) per note (~17 ns per message);
   standalone loopback through ALSA adds ≈ 0 µs on top of midir (p99 69 µs total).
