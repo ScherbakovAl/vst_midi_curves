@@ -14,14 +14,16 @@ CC88) через редактируемую кривую (как «Кривые�
   `src/midi.rs` — только standalone: порты midir и колбэк MIDI;
 - `src/velocity.rs` — декодирование CC88+нота, кодирование 7/14 бит, префикс
   по каналам, `process_midi` (байты → байты);
-- `src/curve/` — `shape.rs` (`CurveShape`, узлы+ручки), `bank.rs` (`CurveBank`,
-  LUT на атомиках для потока MIDI), `legacy.rs` (миграция старого формата),
-  `mod.rs` (`CurveSet`);
+- `src/curve/` — `shape.rs` (`CurveShape`, узлы+ручки), `notemap.rs`
+  (`NoteMap`: покнотные кривые — ключевые ноты, дорожки морфинга, исключения),
+  `bank.rs` (`CurveBank`, LUT на каждую ноту на атомиках для потока MIDI),
+  `legacy.rs` (миграция старого формата), `mod.rs` (`CurveSet`);
 - `src/editor.rs` — общий egui-редактор (`CurvesUi`, undo/redo `History`);
   `src/library.rs` — библиотека форм (пресеты); `src/settings.rs` — настройки
   standalone;
 - `tests/` — `realtime.rs` (0 аллокаций, стресс, бенчмарк), `public_api.rs`,
-  `fixtures/legacy/` (старые пресеты/настройки для проверки миграции).
+  `fixtures/legacy/` (старые пресеты/настройки для проверки миграции),
+  `fixtures/v2/` (настройки и состояние плагина 0.1.0 — одна форма на кривую).
 - Сборка: `./build.sh` (`--install` — в ~/.vst3, ~/.clap и запуск Reaper) /
   `build_linux.sh` / `build_macos.sh` / `build_windows.sh`; `cargo build
   --release` (lib → VST3+CLAP, bin `midi_curves` → standalone).

@@ -11,8 +11,9 @@
 MIDI velocity curves as a **VST3/CLAP plugin** and a **standalone app** (Rust,
 [nih-plug](https://github.com/robbert-vdh/nih-plug) + egui). Every Note On and
 Note Off goes through its own editable Bézier curve, like *Curves* in an image
-editor. High-resolution (14-bit) velocity via the CC88 prefix is supported on
-input and output.
+editor — and every key can have its own curve: set a few key notes, the curves
+in between morph knot by knot. High-resolution (14-bit) velocity via the CC88
+prefix is supported on input and output.
 
 ![MIDI Curves standalone: Note On curve with the last note marker, MIDI ports and presets](img/standalone.png)
 
@@ -26,6 +27,14 @@ Video demo (older version): [YouTube](https://www.youtube.com/watch?v=CtjtueLHJK
   own undo/redo history.
 - The curve passes through its knots; each knot has Bézier handles. The curve is
   always a function of velocity (handles are kept inside their segment).
+- **Per-note curves.** Each of the 128 notes has its own curve table. Key notes
+  (any number, A0–C8) hold curves with the same number of knots; between two
+  key notes every knot moves along its own *morph lane* — a Bézier curve of the
+  knot's x and y across the keyboard (straight by default, i.e. a linear morph;
+  bend it to make a knee travel faster or slower). Knot handles are
+  interpolated linearly. Below the first and above the last key note the curve
+  of that key note holds. *Overrides* are single notes with a curve of their
+  own, outside the morph. One key note (the default) = one curve for all notes.
 - **Hi-res velocity (CC88, MIDI CA-031).** Incoming CC88 is always decoded:
   input x = (128·HH + LL)/16383 when a CC88 preceded the note on that channel,
   otherwise x = HH/127. The *Hi-res output* switch selects the output format:
@@ -34,26 +43,52 @@ Video demo (older version): [YouTube](https://www.youtube.com/watch?v=CtjtueLHJK
 - Everything else (CC, pitch bend, aftertouch, SysEx, clock) passes unchanged.
 - Shared preset folder for the plugin and the app:
   `~/.config/vst_midi_curves/presets` (macOS: `~/Library/Application Support/…`,
-  Windows: `%APPDATA%\…`). Italic entries are built in. A click loads a preset
-  into the open tab; *Save* / *Overwrite* writes the current curve under the typed
-  name, *Delete* removes the file (click twice), *Rescan* re-reads the folder.
-- Plugin state (both curves, output format, open tab) is saved in the DAW project.
-- Realtime path: no locks, no allocations, O(1) per note (~17 ns per message);
-  standalone loopback through ALSA adds ≈ 0 µs on top of midir (p99 69 µs total).
+  Windows: `%APPDATA%\…`). Two kinds of presets:
+  - a **curve** — one shape: a click loads it into the selected note of the open
+    tab; *Save curve* writes the curve of the selected note. Italic entries are
+    built in;
+  - **all** (shown as *name · all*) — the whole setup: Note On and Note Off
+    curves of all notes (key notes, morph lanes, overrides) and the output
+    format; *Save all* writes it, a click loads it in full.
+
+  *Overwrite …* replaces a file with the typed name, *Delete* removes the file
+  (click twice), *Rescan* re-reads the folder.
+- Plugin state (all note curves, output format, open tab) is saved in the DAW project.
+- Realtime path: no locks, no allocations, O(1) per note (≈ 20 ns per message,
+  one table per note: ≈ 1 MB per instance); standalone loopback through ALSA
+  adds ≈ 0 µs on top of midir (p99 69 µs total).
 
 ## Editor
 
+The graph shows the curve of the selected note; the keyboard strip below it
+selects the note and shows key notes (dots), overrides (squares) and the last
+played note (green). Editing a note between key notes makes it a key note
+first — exactly, no other note changes. A knot added or deleted on a key note
+is added or deleted on all key notes (an added knot keeps every key curve as
+it was). Faint curves are the neighbouring key notes.
+
 | Action | Gesture |
 |---|---|
+| select a note | click it on the keyboard strip; *Follow playing* — the last played note |
+| key note / override / remove | right click a key on the strip |
+| move a key note | drag its key on the strip (between the neighbouring key notes) |
 | add a knot (shape unchanged) | click on the curve |
 | move a knot / handle | drag (Shift — fine ×0.1, Ctrl — snap to 1/16); a handle moves symmetrically — the opposite one is mirrored through the knot |
 | move a handle independently | right-drag a handle (the opposite one keeps its length) |
 | delete a knot | right click or double click; Del — selected knot |
 | corner knot | Alt+drag a handle; Alt+click a knot toggles smooth ↔ corner |
 | undo / redo | Ctrl+Z / Ctrl+Shift+Z (or the buttons) |
-| reset | *Diagonal* |
+| reset | *Diagonal* — the selected note; *Reset notes* — one diagonal for all notes |
 
-The green marker shows where the last played note hit the curve. In a DAW the
+**Morph lane** (above the keyboard strip): select a knot on the graph — the lane
+shows how that knot moves across the keyboard, *y* (output) or *x* (input; all
+knots, red where lanes cross and the knot is clamped). Lane knots are the key
+notes: drag one up/down to change the knot at that key note; the handles of the
+selected key note bend the morph (drag — symmetric, right-drag — one side);
+double click a lane knot — back to the linear morph.
+
+The green marker shows where the last played note hit the curve (when it is
+the selected note). In a DAW the
 host may keep keyboard shortcuts for itself (in Reaper: enable *Send all
 keyboard input to plugin* for the FX window); the buttons always work.
 
@@ -100,7 +135,15 @@ lists are re-scanned every 2 s, a port that disappeared closes the connection an
 the chosen device is connected as soon as it (re)appears — also when it is plugged
 in after start. *Refresh* re-scans and reconnects at once. The app's own ports are
 not listed (choosing them would make a loop). Settings live in `~/.config/vst_midi_curves/settings.json`
-(old-format files are migrated; the old file is kept as `settings.v1.json`).
+(old-format files are migrated; the old file is kept as `settings.v1.json` /
+`settings.v2.json`).
+
+## Compatibility
+
+Projects, settings and presets saved by 0.1.0 open with the same curves (one key
+note for all notes). The other way round does not work: 0.1.0 does not read the
+per-note curves of a newer project (its curves fall back to the diagonal) or an
+*all* preset — keep a copy of the project if you may need to go back.
 
 ## Tests
 
