@@ -15,7 +15,7 @@ editor — and every key can have its own curve: set a few key notes, the curves
 in between morph knot by knot. High-resolution (14-bit) velocity via the CC88
 prefix is supported on input and output.
 
-![MIDI Curves standalone: Note On curve with the last note marker, MIDI ports and presets](img/standalone.png)
+![MIDI Curves standalone: Note Off curve of key note C4 with the neighbouring key notes, morph lane of a knot, keyboard strip, MIDI ports and presets](img/standalone.png)
 
 *Standalone app. The plugin shows the same editor without the MIDI panel.*
 
