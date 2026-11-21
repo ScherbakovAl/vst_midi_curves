@@ -15,6 +15,11 @@
 //! Alt+драг ручки — сломать узел в угол, Alt+клик по узлу — гладкий ↔ угол.
 //! Клавиатура: клик — выбрать ноту, драг ключевой — перенести её между
 //! соседними ключевыми, ПКМ — меню (ключевая / исключение / убрать).
+//! Дорожка морфинга (над клавиатурой) — как узел, выбранный на графике, идёт
+//! по клавиатуре: узлы дорожки — ключевые ноты (драг по вертикали — значение
+//! узла в этой ключевой), ручки выбранной ключевой гнут морф (ЛКМ —
+//! симметрично, ПКМ — по отдельности), двойной клик по узлу — снова линейно.
+//! Режим x — веер дорожек x всех узлов, зажатые места (пересечение) — красным.
 //! Ctrl+Z / Ctrl+Shift+Z (Ctrl+Y) — отмена / повтор, история у каждой кривой
 //! своя (вся карта нот); снимок — на отпускании мыши.
 //!
@@ -23,7 +28,8 @@
 //! перезаливает вызывающий — только ноты из [`Outcome::dirty`].
 
 use crate::curve::notemap::{DEFAULT_KEY, NOTES, NOTE_HI, NOTE_LO};
-use crate::curve::{CurveBank, CurveSet, CurveShape, NoteMap, Slot};
+use crate::curve::shape::P2;
+use crate::curve::{Axis, CurveBank, CurveSet, CurveShape, NoteMap, Slot};
 use crate::egui::{self, Color32, Pos2, Rect, Stroke};
 use crate::library::{self, Entry, Library, Preset};
 
@@ -44,6 +50,10 @@ const MARGIN_R: f32 = 12.0;
 /// Высота клавиш и подписей под ними.
 const KB_H: f32 = 34.0;
 const KB_LABEL_H: f32 = 14.0;
+/// Высота поля дорожки морфинга.
+const LANE_H: f32 = 110.0;
+/// Точек на отрезок дорожки при отрисовке.
+const LANE_SEGS: usize = 16;
 /// Клавиш на клавиатуре редактора (A0…C8).
 const KEYS: usize = (NOTE_HI - NOTE_LO + 1) as usize;
 const LAST_NOTE: u8 = (NOTES - 1) as u8;
@@ -53,6 +63,7 @@ const COL_NOTE_OFF: Color32 = Color32::from_rgb(255, 150, 100);
 const COL_MARKER: Color32 = Color32::from_rgb(120, 230, 140);
 const COL_OVERRIDE: Color32 = Color32::from_rgb(235, 195, 80);
 const COL_SET: Color32 = Color32::from_rgb(220, 200, 140);
+const COL_CLAMP: Color32 = Color32::from_rgb(240, 80, 70);
 
 fn color(slot: Slot) -> Color32 {
     match slot {
@@ -149,6 +160,16 @@ struct CurveView {
     /// узел, только если и первый клик был по нему: egui считает двойным и
     /// клик по клавише, за которым сразу клик по графику.
     knot_click: Option<(usize, f64)>,
+    /// Жест на дорожке морфинга: захват, позиция без клампа (нота/127,
+    /// значение), симметричный ли драг ручки, последний клик по узлу дорожки.
+    lane_grab: Option<LaneGrab>,
+    lane_pos: P2,
+    lane_sym: bool,
+    lane_click: Option<(usize, f64)>,
+    /// Зажатые места дорожек x и карта, по которой посчитаны.
+    xclamp: Option<(NoteMap, Vec<Vec<Option<f32>>>)>,
+    #[cfg(test)]
+    lane_rect: Option<Rect>,
     /// Квадрат графика и полоса клавиш на экране в последнем кадре (для тестов).
     #[cfg(test)]
     rect: Option<Rect>,
@@ -169,6 +190,13 @@ impl Default for CurveView {
             key_drag: None,
             menu_note: DEFAULT_KEY,
             knot_click: None,
+            lane_grab: None,
+            lane_pos: [0.0; 2],
+            lane_sym: false,
+            lane_click: None,
+            xclamp: None,
+            #[cfg(test)]
+            lane_rect: None,
             #[cfg(test)]
             rect: None,
             #[cfg(test)]
@@ -364,6 +392,8 @@ pub struct CurvesUi {
     hist: [History<NoteMap>; 2],
     /// Выбор ноты следует за последней сыгранной.
     pub follow: bool,
+    /// Ось дорожки морфинга в редакторе дорожек.
+    lane_axis: Axis,
     lib: Library,
     /// Кэш списка библиотеки (`None` — перечитать папку при показе).
     lib_list: Option<Vec<Entry>>,
@@ -381,6 +411,7 @@ impl CurvesUi {
             views: Default::default(),
             hist: [History::new(&set.note_on), History::new(&set.note_off)],
             follow: false,
+            lane_axis: Axis::Y,
             lib,
             lib_list: None,
             lib_name: String::new(),
@@ -397,6 +428,7 @@ impl CurvesUi {
             v.sel = None;
             v.grab = None;
             v.key_drag = None;
+            v.lane_grab = None;
         }
     }
 
@@ -495,8 +527,35 @@ impl CurvesUi {
         let mut acts = Vec::new();
         egui::TopBottomPanel::bottom("curves_keys").resizable(false).show(ctx, |ui| {
             let tab = self.tab;
-            let map = set.map(tab);
             let view = &mut self.views[tab.idx()];
+            ui.horizontal(|ui| {
+                match view.sel.filter(|&i| i < set.map(tab).knot_count()) {
+                    Some(i) => ui.label(egui::RichText::new(format!("Morph lane of knot {}", i + 1)).strong()),
+                    None => ui.label(egui::RichText::new("Morph lanes").strong()),
+                };
+                for (a, text, tip) in [
+                    (Axis::Y, "y", "Output value of the knot across the keyboard"),
+                    (Axis::X, "x", "Input position of the knot across the keyboard (all knots; red — crossing, clamped)"),
+                ] {
+                    if ui.selectable_label(self.lane_axis == a, text).on_hover_text(tip).clicked() {
+                        self.lane_axis = a;
+                    }
+                }
+                ui.label(
+                    egui::RichText::new(
+                        "drag a lane knot — value at that key note; handles bend the morph; double click — linear",
+                    )
+                    .weak(),
+                );
+            });
+            let le = lane_editor(ui, set.map_mut(tab), self.lane_axis, view, color(tab));
+            if let Some(span) = le.dirty {
+                out.mark(tab, span);
+            }
+            if let Some(n) = le.select {
+                view.note = n;
+            }
+            let map = set.map(tab);
             ui.horizontal(|ui| {
                 ui.label(egui::RichText::new(note_label(view.note)).strong());
                 ui.label(role_text(map, view.note));
@@ -858,6 +917,273 @@ fn input_released(ctx: &egui::Context, prev_busy: &mut bool) -> bool {
     let released = *prev_busy && !busy;
     *prev_busy = busy;
     released
+}
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum LaneGrab {
+    /// Узел дорожки в ключевой (индекс в `keys`).
+    Knot(usize),
+    In(usize),
+    Out(usize),
+}
+
+/// Что сделал жест на дорожке за кадр.
+#[derive(Default)]
+struct LaneEdit {
+    /// Изменились ноты lo..=hi.
+    dirty: Option<(u8, u8)>,
+    /// Выбрать ноту (клик по узлу дорожки).
+    select: Option<u8>,
+}
+
+/// Где дорожки x соседних узлов пересеклись и узел зажат: [узел][нота −
+/// NOTE_LO] → зажатое значение x.
+fn x_clamped(map: &NoteMap) -> Vec<Vec<Option<f32>>> {
+    let n = map.knot_count();
+    let mut out = vec![vec![None; KEYS]; n];
+    for note in NOTE_LO..=NOTE_HI {
+        let s = map.morph_at(note);
+        for (i, row) in out.iter_mut().enumerate().take(n - 1).skip(1) {
+            let x = s.knots[i].x;
+            if (map.lane_value(Axis::X, i, note as f32) - x).abs() > 1e-6 {
+                row[(note - NOTE_LO) as usize] = Some(x);
+            }
+        }
+    }
+    out
+}
+
+/// Ломаная дорожки узла `i` по оси `axis` в координатах (нота/127, значение):
+/// полка до первой ключевой, отрезки Безье, полка после последней.
+fn lane_poly(map: &NoteMap, axis: Axis, i: usize) -> Vec<P2> {
+    let u = |n: u8| n as f32 / 127.0;
+    let first = map.lane_pt(axis, i, 0);
+    let mut pts = vec![[u(NOTE_LO).min(first[0]), first[1]]];
+    for a in 0..map.keys.len() - 1 {
+        let p = map.lane_seg(axis, i, a);
+        pts.extend((0..LANE_SEGS).map(|j| crate::curve::shape::bez(&p, j as f32 / LANE_SEGS as f32)));
+    }
+    let last = map.lane_pt(axis, i, map.keys.len() - 1);
+    pts.push(last);
+    pts.push([u(NOTE_HI).max(last[0]), last[1]]);
+    pts
+}
+
+/// Поле дорожки морфинга узла, выбранного на графике (`st.sel`): ось нот —
+/// как у клавиатуры. Правит карту сразу (значение узла в ключевой, ручки
+/// дорожки, auto).
+fn lane_editor(ui: &mut egui::Ui, map: &mut NoteMap, axis: Axis, st: &mut CurveView, col: Color32) -> LaneEdit {
+    let mut ed = LaneEdit::default();
+    let (resp, painter) = ui.allocate_painter(egui::vec2(ui.available_width(), LANE_H), egui::Sense::click_and_drag());
+    let lr = Rect::from_min_max(
+        resp.rect.min + egui::vec2(MARGIN_L, 6.0),
+        Pos2::new(resp.rect.max.x - MARGIN_R, resp.rect.max.y - 4.0),
+    );
+    #[cfg(test)]
+    {
+        st.lane_rect = Some(lr);
+    }
+    let cw = lr.width() / KEYS as f32;
+    let to_s = |p: P2| Pos2::new(lr.left() + (p[0] * 127.0 - NOTE_LO as f32 + 0.5) * cw, lr.bottom() - p[1] * lr.height());
+    let knot = st.sel.filter(|&i| i < map.knot_count());
+    let sel_key = map.key_at(st.note);
+    let now = ui.input(|i| i.time);
+    let shift = ui.input(|i| i.modifiers.shift);
+    // Узел или ручка выбранной ключевой под точкой `p` на дорожке узла `i`.
+    let hit = |map: &NoteMap, i: usize, p: Pos2| -> Option<LaneGrab> {
+        if let Some(k) = sel_key {
+            if k + 1 < map.keys.len() && to_s(map.lane_seg(axis, i, k)[1]).distance(p) < HIT_HANDLE {
+                return Some(LaneGrab::Out(k));
+            }
+            if k > 0 && to_s(map.lane_seg(axis, i, k - 1)[2]).distance(p) < HIT_HANDLE {
+                return Some(LaneGrab::In(k));
+            }
+        }
+        (0..map.keys.len())
+            .map(|k| (k, to_s(map.lane_pt(axis, i, k)).distance(p)))
+            .filter(|&(_, d)| d < HIT_KNOT)
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .map(|(k, _)| LaneGrab::Knot(k))
+    };
+    let tip = |map: &NoteMap, i: usize, g: LaneGrab| match g {
+        LaneGrab::Knot(k) => map.lane_pt(axis, i, k),
+        LaneGrab::Out(k) => map.lane_seg(axis, i, k)[1],
+        LaneGrab::In(k) => map.lane_seg(axis, i, k - 1)[2],
+    };
+
+    if let Some(i) = knot {
+        // Клик по узлу дорожки — выбрать ключевую; двойной (оба клика по
+        // нему) — вернуть линейный морф.
+        if resp.clicked() {
+            if let Some(LaneGrab::Knot(k)) = resp.interact_pointer_pos().and_then(|p| hit(map, i, p)) {
+                let second = resp.double_clicked() && st.lane_click.is_some_and(|(j, t)| j == k && now - t < 0.6);
+                if second {
+                    map.set_lane_auto(axis, i, k);
+                    ed.dirty = Some(map.key_span(k));
+                    st.lane_click = None;
+                } else {
+                    ed.select = Some(map.keys[k].note);
+                    st.lane_click = Some((k, now));
+                }
+            }
+        }
+        let primary = resp.drag_started_by(egui::PointerButton::Primary);
+        let started = primary || resp.drag_started_by(egui::PointerButton::Secondary);
+        let origin = ui.input(|i| i.pointer.press_origin());
+        if started {
+            st.lane_grab = origin
+                .and_then(|p| hit(map, i, p))
+                .filter(|g| primary || !matches!(g, LaneGrab::Knot(_)));
+            st.lane_sym = primary;
+            if let Some(g) = st.lane_grab {
+                st.lane_pos = tip(map, i, g);
+                if let LaneGrab::Knot(k) = g {
+                    ed.select = Some(map.keys[k].note);
+                }
+            }
+        }
+        let dragging =
+            resp.dragged_by(egui::PointerButton::Primary) || resp.dragged_by(egui::PointerButton::Secondary);
+        if let (true, Some(g)) = (dragging, st.lane_grab) {
+            // В кадре начала — весь ход от точки нажатия: путь до порога драга
+            // egui (несколько пикселей) иначе теряется.
+            let d = match (started, origin, resp.interact_pointer_pos()) {
+                (true, Some(o), Some(p)) => p - o,
+                _ => resp.drag_delta(),
+            };
+            let f = if shift { 0.1 } else { 1.0 };
+            st.lane_pos[0] += d.x / (cw * 127.0) * f;
+            st.lane_pos[1] -= d.y / lr.height() * f;
+            if d != egui::Vec2::ZERO {
+                let k = match g {
+                    // По горизонтали узел не ходит: ключевую переносят на клавиатуре.
+                    LaneGrab::Knot(k) => {
+                        let s = &mut map.keys[k].shape;
+                        let (kn, v) = (s.knots[i], st.lane_pos[1]);
+                        match axis {
+                            Axis::Y => s.move_knot(i, kn.x, v),
+                            Axis::X => s.move_knot(i, v, kn.y),
+                        }
+                        k
+                    }
+                    LaneGrab::Out(k) | LaneGrab::In(k) => {
+                        let o = map.lane_pt(axis, i, k);
+                        let v = [st.lane_pos[0] - o[0], st.lane_pos[1] - o[1]];
+                        map.set_lane_handle(axis, i, k, matches!(g, LaneGrab::Out(_)), v, st.lane_sym);
+                        k
+                    }
+                };
+                ed.dirty = Some(map.key_span(k));
+            }
+        }
+        if resp.drag_stopped() {
+            st.lane_grab = None;
+        }
+    }
+    let hover = match (knot, st.lane_grab) {
+        (Some(i), None) => resp.hover_pos().and_then(|p| hit(map, i, p)),
+        _ => None,
+    };
+    if st.lane_grab.is_some() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+    } else if hover.is_some() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+    }
+
+    // ── Отрисовка ──
+    painter.rect_filled(lr, 0.0, Color32::from_gray(22));
+    let grid = Stroke::new(1.0_f32, Color32::from_gray(40));
+    let font = egui::FontId::proportional(10.0);
+    for j in 0..=4 {
+        let v = j as f32 / 4.0;
+        let y = lr.bottom() - v * lr.height();
+        painter.line_segment([Pos2::new(lr.left(), y), Pos2::new(lr.right(), y)], grid);
+        if j % 2 == 0 {
+            painter.text(
+                Pos2::new(lr.left() - 6.0, y),
+                egui::Align2::RIGHT_CENTER,
+                ((v * 127.0).round() as u32).to_string(),
+                font.clone(),
+                Color32::from_gray(150),
+            );
+        }
+    }
+    for n in (NOTE_LO..=NOTE_HI).filter(|n| n % 12 == 0) {
+        let x = to_s([n as f32 / 127.0, 0.0]).x;
+        painter.line_segment([Pos2::new(x, lr.top()), Pos2::new(x, lr.bottom())], grid);
+    }
+    for o in &map.overrides {
+        let x = to_s([o.note as f32 / 127.0, 0.0]).x;
+        painter.line_segment([Pos2::new(x, lr.bottom() - 6.0), Pos2::new(x, lr.bottom())], Stroke::new(2.0_f32, COL_OVERRIDE));
+    }
+    if (NOTE_LO..=NOTE_HI).contains(&st.note) {
+        let x = to_s([st.note as f32 / 127.0, 0.0]).x;
+        painter.line_segment(
+            [Pos2::new(x, lr.top()), Pos2::new(x, lr.bottom())],
+            Stroke::new(1.0_f32, Color32::from_white_alpha(70)),
+        );
+    }
+    painter.rect_stroke(lr, 0.0, Stroke::new(1.0_f32, Color32::from_gray(90)), egui::StrokeKind::Outside);
+    let Some(i) = knot else {
+        painter.text(
+            lr.center(),
+            egui::Align2::CENTER_CENTER,
+            "select a knot on the graph to see how it moves across the keyboard",
+            egui::FontId::proportional(12.0),
+            Color32::from_gray(140),
+        );
+        return ed;
+    };
+    let nk = map.knot_count();
+    let lanes: Vec<usize> = match axis {
+        Axis::Y => vec![i],
+        Axis::X => (1..nk - 1).collect(),
+    };
+    for &j in lanes.iter().filter(|&&j| j != i) {
+        let pts: Vec<Pos2> = lane_poly(map, axis, j).into_iter().map(to_s).collect();
+        painter.add(egui::Shape::line(pts, Stroke::new(1.0_f32, col.gamma_multiply(0.35))));
+    }
+    let pts: Vec<Pos2> = lane_poly(map, axis, i).into_iter().map(to_s).collect();
+    painter.add(egui::Shape::line(pts, Stroke::new(2.0_f32, col)));
+    if axis == Axis::X {
+        if st.xclamp.as_ref().is_none_or(|(m, _)| m != map) {
+            st.xclamp = Some((map.clone(), x_clamped(map)));
+        }
+        if let Some((_, cl)) = &st.xclamp {
+            for row in cl.iter() {
+                for (j, x) in row.iter().enumerate() {
+                    if let Some(x) = *x {
+                        let n = NOTE_LO + j as u8;
+                        painter.circle_filled(to_s([n as f32 / 127.0, x]), 2.0, COL_CLAMP);
+                    }
+                }
+            }
+        }
+    }
+    let len = map.keys.len();
+    if let Some(k) = sel_key {
+        let o = to_s(map.lane_pt(axis, i, k));
+        for (show, g) in [(k > 0, LaneGrab::In(k)), (k + 1 < len, LaneGrab::Out(k))] {
+            if show {
+                let hp = to_s(tip(map, i, g));
+                let hot = hover == Some(g) || st.lane_grab == Some(g);
+                painter.line_segment([o, hp], Stroke::new(1.0_f32, Color32::from_gray(170)));
+                painter.circle_filled(hp, if hot { 5.0 } else { 3.5 }, Color32::from_gray(if hot { 255 } else { 200 }));
+            }
+        }
+    }
+    for k in 0..len {
+        let p = to_s(map.lane_pt(axis, i, k));
+        let hot = hover == Some(LaneGrab::Knot(k)) || st.lane_grab == Some(LaneGrab::Knot(k));
+        let r = if hot { 6.0 } else { 4.5 };
+        let c = if hot { Color32::WHITE } else { col };
+        if Some(k) == sel_key {
+            painter.circle_filled(p, r, c);
+        } else {
+            painter.circle_stroke(p, r, Stroke::new(1.5_f32, c));
+        }
+    }
+    ed
 }
 
 /// Полоса клавиатуры A0…C8: клетка на полутон (ось нот общая с дорожками
@@ -1399,6 +1725,13 @@ mod tests {
             Pos2::new(r.left() + ((n - NOTE_LO) as f32 + 0.5) * cw, r.center().y)
         }
 
+        /// Точка поля дорожки (нота, значение) → экран.
+        fn lane(&self, p: P2) -> Pos2 {
+            let r = self.ui.views[self.ui.tab.idx()].lane_rect.unwrap();
+            let cw = r.width() / KEYS as f32;
+            Pos2::new(r.left() + (p[0] * 127.0 - NOTE_LO as f32 + 0.5) * cw, r.bottom() - p[1] * r.height())
+        }
+
         fn button(&mut self, p: Pos2, button: egui::PointerButton, pressed: bool) -> Outcome {
             let e = egui::Event::PointerButton { pos: p, button, pressed, modifiers: egui::Modifiers::NONE };
             self.frame(vec![e], egui::Modifiers::NONE)
@@ -1744,6 +2077,106 @@ mod tests {
         assert_eq!(h.set.note_on, NoteMap::default());
         out.store(&h.set, &h.bank);
         h.assert_bank_in_sync();
+    }
+
+    /// Карта с ключевыми 30, 60, 90 (60 — точная вставка), выбраны нота 60 и
+    /// её средний узел: дорожка y узла 1 на поле дорожек.
+    fn lane_harness() -> (Harness, NoteMap) {
+        let mut h = Harness::with(two_keys());
+        let mut out = Outcome::default();
+        h.ui.key_action(&mut h.set, KeyAction::MakeKey(60), &mut out);
+        out.store(&h.set, &h.bank);
+        let p = h.set.note_on.keys[1].shape.pt(1);
+        h.click(h.at(p), egui::PointerButton::Primary);
+        assert_eq!((h.ui.note(), h.ui.views[0].sel), (60, Some(1)));
+        let start = h.set.note_on.clone();
+        (h, start)
+    }
+
+    /// Какие ноты изменились против карты `a`.
+    fn changed_notes(a: &NoteMap, b: &NoteMap) -> Vec<u8> {
+        (0..NOTES as u8).filter(|&n| a.shape_at(n) != b.shape_at(n)).collect()
+    }
+
+    /// ПКМ-драг ручки дорожки — только ноты своего отрезка; ЛКМ — обоих
+    /// (вторая ручка зеркально); двойной клик по узлу дорожки — снова
+    /// линейный морф, карта бит-в-бит; отмена.
+    #[test]
+    fn lane_handles_bend_only_their_segments() {
+        let (mut h, start) = lane_harness();
+        let m = &h.set.note_on;
+        let tip = m.lane_seg(Axis::Y, 1, 1)[1];
+        let out = h.drag_by(h.lane(tip), h.lane(tip) + egui::vec2(0.0, -30.0), egui::PointerButton::Secondary);
+        assert_eq!(out.dirty[0], Some((30, 90)));
+        assert_eq!(changed_notes(&start, &h.set.note_on), (61..90).collect::<Vec<_>>());
+        assert!(!h.set.note_on.lanes[1].y[1].auto);
+        h.assert_bank_in_sync();
+        let one_side = h.set.note_on.clone();
+        // ЛКМ — симметрично: меняются оба отрезка вокруг 60.
+        let tip = h.set.note_on.lane_seg(Axis::Y, 1, 1)[1];
+        h.drag(h.lane(tip), h.lane(tip) + egui::vec2(0.0, 20.0));
+        let both: Vec<u8> = (31..90).filter(|&n| n != 60).collect();
+        assert_eq!(changed_notes(&start, &h.set.note_on), both);
+        let (hi, ho) = (h.set.note_on.lane_hin(Axis::Y, 1, 1), h.set.note_on.lane_hout(Axis::Y, 1, 1));
+        assert!((hi[0] + ho[0]).abs() < 1e-6 && (hi[1] + ho[1]).abs() < 1e-6, "{hi:?} {ho:?}");
+        h.assert_bank_in_sync();
+        // Двойной клик по узлу дорожки (после паузы: иначе egui сочтёт клик тройным).
+        h.t += 1.0;
+        let k = h.lane(h.set.note_on.lane_pt(Axis::Y, 1, 1));
+        h.click(k, egui::PointerButton::Primary);
+        let out = h.click(k, egui::PointerButton::Primary);
+        assert_eq!(h.set.note_on, start, "двойной клик не вернул линейный морф");
+        assert!(out.committed);
+        h.assert_bank_in_sync();
+        h.key_press(egui::Key::Z, egui::Modifiers::CTRL);
+        assert_ne!(h.set.note_on, start);
+        h.key_press(egui::Key::Z, egui::Modifiers::CTRL);
+        assert_eq!(h.set.note_on, one_side);
+        h.assert_bank_in_sync();
+    }
+
+    /// Узел дорожки ходит только по вертикали: значение узла в ключевой.
+    #[test]
+    fn lane_knot_drag_sets_value_at_key() {
+        let (mut h, start) = lane_harness();
+        let p = h.set.note_on.lane_pt(Axis::Y, 1, 0);
+        let lr = h.ui.views[0].lane_rect.unwrap();
+        let out = h.drag(h.lane(p), h.lane(p) + egui::vec2(25.0, -0.2 * lr.height()));
+        let k = h.set.note_on.keys[0].shape.knots[1];
+        let k0 = start.keys[0].shape.knots[1];
+        assert!((k.y - (k0.y + 0.2)).abs() < 0.005 && k.x == k0.x, "{k0:?} → {k:?}");
+        assert_eq!(h.set.note_on.keys[0].note, 30, "узел дорожки не переносит ключевую");
+        assert_eq!(h.ui.note(), 30, "драг узла выбирает его ключевую");
+        assert_eq!(out.dirty[0], Some((0, 60)));
+        h.assert_bank_in_sync();
+        // Режим x: тот же жест двигает узел по x.
+        h.ui.lane_axis = Axis::X;
+        h.frame(vec![], egui::Modifiers::NONE);
+        let p = h.set.note_on.lane_pt(Axis::X, 1, 0);
+        h.drag(h.lane(p), h.lane(p) + egui::vec2(0.0, -0.1 * lr.height()));
+        let k1 = h.set.note_on.keys[0].shape.knots[1];
+        assert!((k1.x - (k.x + 0.1)).abs() < 0.005 && k1.y == k.y, "{k:?} → {k1:?}");
+    }
+
+    /// Изогнутая дорожка x узла 1 заходит за дорожку узла 2 — там узел
+    /// зажат (красные точки), формы нот остаются функцией velocity.
+    #[test]
+    fn crossing_x_lanes_are_detected() {
+        let mut m = two_keys().note_on;
+        m.insert_knot(1, 0.5);
+        assert!(x_clamped(&m).iter().flatten().all(Option::is_none));
+        m.set_lane_handle(Axis::X, 1, 0, true, [0.2, 0.6], false);
+        let cl = x_clamped(&m);
+        let hits: Vec<(usize, u8)> = cl
+            .iter()
+            .enumerate()
+            .flat_map(|(i, row)| row.iter().enumerate().filter(|(_, x)| x.is_some()).map(move |(j, _)| (i, NOTE_LO + j as u8)))
+            .collect();
+        assert!(!hits.is_empty() && hits.iter().all(|&(i, n)| i >= 1 && (31..90).contains(&n)), "{hits:?}");
+        for n in 0..NOTES as u8 {
+            let k = m.shape_at(n).knots;
+            assert!(k.windows(2).all(|w| w[1].x > w[0].x), "нота {n}");
+        }
     }
 
     /// Время кадра при драге узла ключевой ноты в карте из 8 ключевых по 6
