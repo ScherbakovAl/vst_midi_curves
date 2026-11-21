@@ -82,6 +82,39 @@ pub(crate) fn bez(p: &[P2; 4], t: f32) -> P2 {
     ]
 }
 
+/// Параметр t ∈ [`t0`, 1] точки сегмента `p` с абсциссой `x`; x(t) монотонна
+/// (см. [`CurveShape`]), `t0` — нижняя граница корня (при проходе по
+/// возрастающим x — t прошлой точки). Ньютон по x(t) = a·t³ + b·t² + c·t + x₀
+/// (степенной вид Безье, в f64) с вилкой [lo, hi]: шаг за вилку или по плоскому
+/// месту (x'(t) ≤ 0) — бисекция, поэтому сходится всегда.
+pub(crate) fn solve_t(p: &[P2; 4], x: f32, t0: f32) -> f32 {
+    let (x0, x1, x2, x3) = (p[0][0] as f64, p[1][0] as f64, p[2][0] as f64, p[3][0] as f64);
+    let c = 3.0 * (x1 - x0);
+    let b = 3.0 * (x2 - 2.0 * x1 + x0);
+    let a = x3 - x0 - c - b;
+    let x = x as f64;
+    let (mut lo, mut hi) = (t0.clamp(0.0, 1.0) as f64, 1.0f64);
+    let mut t = lo;
+    for _ in 0..60 {
+        let f = ((a * t + b) * t + c) * t + x0 - x;
+        if f.abs() <= 1.0e-10 {
+            break;
+        }
+        if f < 0.0 {
+            lo = t;
+        } else {
+            hi = t;
+        }
+        if hi - lo <= 1.0e-9 {
+            break;
+        }
+        let d = (3.0 * a * t + 2.0 * b) * t + c;
+        let tn = t - f / d;
+        t = if d > 0.0 && tn > lo && tn < hi { tn } else { 0.5 * (lo + hi) };
+    }
+    t as f32
+}
+
 impl CurveShape {
     /// Диагональ y = x.
     pub fn linear() -> Self {
@@ -145,6 +178,29 @@ impl CurveShape {
     pub fn eval(&self, x: f32) -> f32 {
         let (i, t) = self.locate(x);
         bez(&self.seg(i), t)[1].clamp(0.0, 1.0)
+    }
+
+    /// Таблица y по равномерной сетке x_j = j/(len−1) (len ≥ 2) — то же, что
+    /// `eval` в каждой точке, но за один проход: x растёт ⇒ сегмент и t внутри
+    /// сегмента не убывают, корень ищется от t прошлой точки ([`solve_t`]).
+    pub fn fill_lut(&self, out: &mut [f32]) {
+        let n = self.knots.len();
+        let last = (out.len() - 1) as f32;
+        let mut i = 0;
+        let mut p = self.seg(0);
+        let mut t = 0.0f32;
+        for (j, o) in out.iter_mut().enumerate() {
+            let x = j as f32 / last;
+            while i + 2 < n && self.knots[i + 1].x <= x {
+                i += 1;
+                p = self.seg(i);
+                t = 0.0;
+            }
+            if p[3][0] - p[0][0] > 0.0 {
+                t = solve_t(&p, x, t);
+            }
+            *o = bez(&p, t)[1].clamp(0.0, 1.0);
+        }
     }
 
     /// Привести форму в допустимую: ≥2 конечных узла по возрастанию x с
@@ -331,6 +387,48 @@ mod tests {
             let x = bez(&p, j as f32 / 1000.0)[0];
             assert!(x >= prev - 1e-6, "x(t) убывает на j={j}");
             prev = x;
+        }
+    }
+
+    /// Один проход `fill_lut` даёт то же, что `eval` в каждой точке сетки, —
+    /// и на формах с плоскими местами x(t) (ручки нулевой длины, «ступенька»,
+    /// ручки за краем сегмента). На почти вертикальных участках эталон сам
+    /// точен лишь до шага f32 по x — сверка с коридором eval(x ± 1 ulp).
+    #[test]
+    fn fill_lut_matches_eval() {
+        let mut shapes = vec![CurveShape::linear()];
+        let mut step = CurveShape::linear();
+        step.knots[0].hout = [0.5, 0.0];
+        step.knots[1].hin = [-0.5, 0.0];
+        shapes.push(step);
+        let mut flat = CurveShape::linear();
+        flat.knots[0].hout = [0.0, 0.0];
+        flat.knots[1].hin = [0.0, 0.0];
+        shapes.push(flat);
+        let mut steep = CurveShape::linear();
+        steep.knots[0].hout = [0.02, 0.6];
+        steep.knots[1].hin = [-0.9, -0.05];
+        shapes.push(steep);
+        let mut wild = CurveShape::linear();
+        for (x, y) in [(0.2, 0.9), (0.21, 0.1), (0.6, 0.6), (0.9, 0.0)] {
+            let i = wild.insert_at(x).unwrap();
+            wild.move_knot(i, x, y);
+        }
+        wild.knots[1].hout = [3.0, -1.0];
+        wild.knots[2].hin = [-4.0, 2.0];
+        wild.knots[3].hout = [0.0, 0.3];
+        shapes.push(wild);
+        for s in &shapes {
+            for len in [2, 257, 1025] {
+                let mut lut = vec![0.0f32; len];
+                s.fill_lut(&mut lut);
+                for (j, &y) in lut.iter().enumerate() {
+                    let x = j as f32 / (len - 1) as f32;
+                    let (a, b) = (s.eval(x - 1.2e-7), s.eval(x + 1.2e-7));
+                    let (lo, hi) = (a.min(b).min(s.eval(x)) - 1e-6, a.max(b).max(s.eval(x)) + 1e-6);
+                    assert!((lo..=hi).contains(&y), "j={j}/{len}: {y} вне [{lo}, {hi}], форма {s:?}");
+                }
+            }
         }
     }
 

@@ -69,11 +69,12 @@ impl CurveBank {
         bank
     }
 
-    /// GUI / главный поток: залить таблицу кривой (1025 вычислений формы).
+    /// GUI / главный поток: залить таблицу кривой (один проход
+    /// [`CurveShape::fill_lut`]).
     pub fn store(&self, slot: Slot, shape: &CurveShape) {
-        let lut = &self.lut[slot.idx()];
-        for (j, a) in lut.iter().enumerate() {
-            let y = shape.eval(j as f32 / (LUT_N - 1) as f32);
+        let mut ys = [0.0f32; LUT_N];
+        shape.fill_lut(&mut ys);
+        for (a, y) in self.lut[slot.idx()].iter().zip(ys) {
             a.store(y.to_bits(), Ordering::Relaxed);
         }
         self.edits.fetch_add(1, Ordering::Relaxed);
