@@ -1,15 +1,20 @@
 //! Банк кривых для потока MIDI (аудиопоток плагина, колбэк midir в standalone):
-//! таблицы кривых Note On / Note Off в атомиках, флаг формата выхода и маркеры
-//! последней ноты. Паттерн `VelCurveBank` из piano_sim.
+//! таблицы кривых Note On / Note Off — своя на каждую из 128 нот — в атомиках,
+//! флаг формата выхода и маркеры последней ноты. Паттерн `VelCurveBank` из
+//! piano_sim.
 //!
 //! Поток MIDI только читает (`eval`, `hi_res`) и пишет маркеры (`note`);
-//! GUI переписывает таблицу при правке (`store`). Блокировок нет, всё —
+//! GUI переписывает таблицы при правке (`store*`). Блокировок нет, всё —
 //! `Relaxed`: межпеременных инвариантов нет. Пока GUI переписывает таблицу
 //! во время драга, нота может взять смесь соседних старых и новых точек — это
 //! промежуточная форма той же правки, выход всё равно в [0, 1].
+//!
+//! Память: 2 × 128 × 1025 × 4 Б ≈ 1 МБ на экземпляр; событие читает две
+//! соседние точки таблицы своей ноты (первое касание ноты — промах кэша).
 
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, Ordering};
 
+use super::notemap::{NoteMap, NOTES};
 use super::shape::CurveShape;
 
 /// Точек таблицы кривой по velocity (шаг 1/1024, между точками — линейно).
@@ -34,12 +39,15 @@ impl Slot {
 }
 
 pub struct CurveBank {
-    /// y (0…1) по равномерной сетке x, биты f32.
-    lut: [[AtomicU32; LUT_N]; 2],
+    /// y (0…1) по равномерной сетке x, биты f32: таблица (кривая, нота)
+    /// начинается с (slot·128 + note)·LUT_N. В куче: 1 МБ на стеке не собрать.
+    lut: Box<[AtomicU32]>,
     /// Формат выхода: true — 14 бит (CC88 + нота), false — 7 бит.
     hi_res: AtomicBool,
     /// Вход x (0…1) последней ноты каждой кривой, биты f32; NaN — нот не было.
     last_x: [AtomicU32; 2],
+    /// Номер последней ноты каждой кривой.
+    last_note: [AtomicU8; 2],
     /// Счётчик обработанных нот (GUI перерисовывает маркер, когда он меняется).
     notes: AtomicU64,
     /// Счётчик заливок таблиц.
@@ -52,13 +60,20 @@ impl Default for CurveBank {
     }
 }
 
+/// Начало таблицы (кривая, нота); нота зажата маской — индекс всегда в банке.
+#[inline]
+fn base(slot: Slot, note: u8) -> usize {
+    (slot.idx() * NOTES + (note & 0x7F) as usize) * LUT_N
+}
+
 impl CurveBank {
-    /// Обе кривые — диагональ, выход 7 бит.
+    /// Все кривые всех нот — диагональ, выход 7 бит.
     pub fn new() -> Self {
         let bank = Self {
-            lut: std::array::from_fn(|_| std::array::from_fn(|_| AtomicU32::new(0))),
+            lut: (0..2 * NOTES * LUT_N).map(|_| AtomicU32::new(0)).collect(),
             hi_res: AtomicBool::new(false),
             last_x: std::array::from_fn(|_| AtomicU32::new(f32::NAN.to_bits())),
+            last_note: std::array::from_fn(|_| AtomicU8::new(0)),
             notes: AtomicU64::new(0),
             edits: AtomicU64::new(0),
         };
@@ -69,23 +84,57 @@ impl CurveBank {
         bank
     }
 
-    /// GUI / главный поток: залить таблицу кривой (один проход
-    /// [`CurveShape::fill_lut`]).
+    /// Записать готовую таблицу ноты.
+    fn write(&self, slot: Slot, note: u8, ys: &[f32; LUT_N]) {
+        let b = base(slot, note);
+        for (a, y) in self.lut[b..b + LUT_N].iter().zip(ys) {
+            a.store(y.to_bits(), Ordering::Relaxed);
+        }
+    }
+
+    /// GUI / главный поток: одна форма на все ноты кривой.
     pub fn store(&self, slot: Slot, shape: &CurveShape) {
         let mut ys = [0.0f32; LUT_N];
         shape.fill_lut(&mut ys);
-        for (a, y) in self.lut[slot.idx()].iter().zip(ys) {
-            a.store(y.to_bits(), Ordering::Relaxed);
+        for n in 0..NOTES as u8 {
+            self.write(slot, n, &ys);
         }
         self.edits.fetch_add(1, Ordering::Relaxed);
     }
 
-    /// Поток MIDI: y(x) по таблице, O(1). x вне [0, 1] и NaN зажимаются.
+    /// GUI / главный поток: таблица одной ноты ([`CurveShape::fill_lut`]).
+    pub fn store_note(&self, slot: Slot, note: u8, shape: &CurveShape) {
+        let mut ys = [0.0f32; LUT_N];
+        shape.fill_lut(&mut ys);
+        self.write(slot, note, &ys);
+        self.edits.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// GUI / главный поток: таблицы нот `lo..=hi` по карте. Подряд идущие
+    /// одинаковые формы (ниже первой / выше последней ключевой, одна
+    /// ключевая) считаются один раз.
+    pub fn store_map(&self, slot: Slot, map: &NoteMap, lo: u8, hi: u8) {
+        let mut ys = [0.0f32; LUT_N];
+        let mut prev: Option<CurveShape> = None;
+        for n in lo..=hi.min((NOTES - 1) as u8) {
+            let s = map.shape_at(n);
+            if prev.as_ref() != Some(&s) {
+                s.fill_lut(&mut ys);
+                prev = Some(s);
+            }
+            self.write(slot, n, &ys);
+        }
+        self.edits.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Поток MIDI: y(x) ноты `note` по её таблице, O(1). x вне [0, 1] и NaN
+    /// зажимаются.
     ///
     /// f = x·(N−1), j = min(⌊f⌋, N−2), w = f − j, y = L[j] + (L[j+1] − L[j])·w.
     #[inline]
-    pub fn eval(&self, slot: Slot, x: f32) -> f32 {
-        let lut = &self.lut[slot.idx()];
+    pub fn eval(&self, slot: Slot, note: u8, x: f32) -> f32 {
+        let b = base(slot, note);
+        let lut = &self.lut[b..b + LUT_N];
         let x = if x > 0.0 { x.min(1.0) } else { 0.0 };
         let f = x * (LUT_N - 1) as f32;
         let j = (f as usize).min(LUT_N - 2);
@@ -104,9 +153,10 @@ impl CurveBank {
         self.hi_res.store(on, Ordering::Relaxed);
     }
 
-    /// Поток MIDI: запомнить вход ноты (маркер в редакторе).
+    /// Поток MIDI: запомнить ноту и её вход (маркер в редакторе).
     #[inline]
-    pub fn note(&self, slot: Slot, x: f32) {
+    pub fn note(&self, slot: Slot, note: u8, x: f32) {
+        self.last_note[slot.idx()].store(note & 0x7F, Ordering::Relaxed);
         self.last_x[slot.idx()].store(x.to_bits(), Ordering::Relaxed);
         self.notes.fetch_add(1, Ordering::Relaxed);
     }
@@ -115,6 +165,11 @@ impl CurveBank {
     pub fn last_x(&self, slot: Slot) -> Option<f32> {
         let v = f32::from_bits(self.last_x[slot.idx()].load(Ordering::Relaxed));
         v.is_finite().then_some(v)
+    }
+
+    /// Номер последней ноты кривой `slot`, если ноты были.
+    pub fn last_note(&self, slot: Slot) -> Option<u8> {
+        self.last_x(slot).map(|_| self.last_note[slot.idx()].load(Ordering::Relaxed))
     }
 
     /// Сколько нот обработано (для перерисовки маркера и счётчика в GUI).
@@ -137,11 +192,11 @@ mod tests {
     /// младших разрядах 14 бит.
     fn lut_error(shape: &CurveShape) -> f32 {
         let bank = CurveBank::new();
-        bank.store(Slot::NoteOn, shape);
+        bank.store_note(Slot::NoteOn, 64, shape);
         (0..=16383u32)
             .map(|code| {
                 let x = code as f32 / 16383.0;
-                (bank.eval(Slot::NoteOn, x) - shape.eval(x)).abs() * 16383.0
+                (bank.eval(Slot::NoteOn, 64, x) - shape.eval(x)).abs() * 16383.0
             })
             .fold(0.0, f32::max)
     }
@@ -189,9 +244,42 @@ mod tests {
     #[test]
     fn eval_clamps_input() {
         let bank = CurveBank::new();
-        assert!(bank.eval(Slot::NoteOff, -3.0) < 1e-6);
-        assert_eq!(bank.eval(Slot::NoteOff, -3.0), bank.eval(Slot::NoteOff, f32::NAN));
-        assert!((bank.eval(Slot::NoteOff, 7.0) - 1.0).abs() < 1e-6);
+        assert!(bank.eval(Slot::NoteOff, 0, -3.0) < 1e-6);
+        assert_eq!(bank.eval(Slot::NoteOff, 0, -3.0), bank.eval(Slot::NoteOff, 0, f32::NAN));
+        assert!((bank.eval(Slot::NoteOff, 127, 7.0) - 1.0).abs() < 1e-6);
+        // Нота за 127 (битый вход) — маска, не выход за банк.
+        assert_eq!(bank.eval(Slot::NoteOff, 200, 0.5), bank.eval(Slot::NoteOff, 200 & 0x7F, 0.5));
+    }
+
+    /// Таблицы нот независимы: своя форма у ноты и у кривой, карта заливается
+    /// по нотам, маркер помнит ноту.
+    #[test]
+    fn tables_per_note_and_map() {
+        let bank = CurveBank::new();
+        let mut low = CurveShape::linear();
+        low.move_knot(1, 1.0, 0.5);
+        bank.store_note(Slot::NoteOn, 40, &low);
+        assert!((bank.eval(Slot::NoteOn, 40, 1.0) - 0.5).abs() < 1e-6);
+        assert!((bank.eval(Slot::NoteOn, 41, 1.0) - 1.0).abs() < 1e-6);
+        assert!((bank.eval(Slot::NoteOff, 40, 1.0) - 1.0).abs() < 1e-6);
+        // Карта: ключевые 30 (y(1) = 0.5) и 90 (диагональ) — линейный морф.
+        let mut map = NoteMap::single(low);
+        map.keys[0].note = 30;
+        let k = map.add_key(90);
+        map.keys[k].shape = CurveShape::linear();
+        bank.store_map(Slot::NoteOff, &map, 0, 127);
+        for n in 0..NOTES as u8 {
+            let t = ((n as f32 - 30.0) / 60.0).clamp(0.0, 1.0);
+            let want = 0.5 + 0.5 * t;
+            assert!((bank.eval(Slot::NoteOff, n, 1.0) - want).abs() < 1e-5, "нота {n}");
+            let s = map.shape_at(n);
+            for x in [0.1f32, 0.37, 0.8] {
+                assert!((bank.eval(Slot::NoteOff, n, x) - s.eval(x)).abs() < 1e-5, "нота {n}, x {x}");
+            }
+        }
+        assert_eq!((bank.last_note(Slot::NoteOn), bank.last_x(Slot::NoteOn)), (None, None));
+        bank.note(Slot::NoteOn, 61, 0.25);
+        assert_eq!((bank.last_note(Slot::NoteOn), bank.last_x(Slot::NoteOn)), (Some(61), Some(0.25)));
     }
 }
 

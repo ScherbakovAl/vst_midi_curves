@@ -116,14 +116,14 @@ pub fn process_event(
             send(NoteEvent::NoteOn { timing, voice_id, channel, note, velocity });
         }
         NoteEvent::NoteOn { timing, voice_id, channel, note, velocity } => {
-            let out = map_note(bank, Slot::NoteOn, input(prefix, channel, velocity));
+            let out = map_note(bank, Slot::NoteOn, note, input(prefix, channel, velocity));
             if let Some(ll) = out.ll {
                 send(NoteEvent::MidiCC { timing, channel, cc: CC_HIRES_VELOCITY, value: ll as f32 / 127.0 });
             }
             send(NoteEvent::NoteOn { timing, voice_id, channel, note, velocity: out.vel as f32 / 127.0 });
         }
         NoteEvent::NoteOff { timing, voice_id, channel, note, velocity } => {
-            let out = map_note(bank, Slot::NoteOff, input(prefix, channel, velocity));
+            let out = map_note(bank, Slot::NoteOff, note, input(prefix, channel, velocity));
             if let Some(ll) = out.ll {
                 send(NoteEvent::MidiCC { timing, channel, cc: CC_HIRES_VELOCITY, value: ll as f32 / 127.0 });
             }

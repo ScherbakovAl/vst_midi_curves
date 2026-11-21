@@ -95,12 +95,12 @@ pub struct NoteOut {
     pub vel: u8,
 }
 
-/// Нота с входом `x` (0…1) через кривую `slot`; формат выхода — флаг банка.
-/// Отмечает маркер последней ноты.
+/// Нота `note` с входом `x` (0…1) через кривую `slot` этой ноты; формат
+/// выхода — флаг банка. Отмечает маркер последней ноты.
 #[inline]
-pub fn map_note(bank: &CurveBank, slot: Slot, x: f32) -> NoteOut {
-    let y = bank.eval(slot, x);
-    bank.note(slot, x);
+pub fn map_note(bank: &CurveBank, slot: Slot, note: u8, x: f32) -> NoteOut {
+    let y = bank.eval(slot, note, x);
+    bank.note(slot, note, x);
     let note_on = slot == Slot::NoteOn;
     if bank.hi_res() {
         let (hh, ll) = encode14(y, note_on);
@@ -131,7 +131,7 @@ pub fn process_midi(bank: &CurveBank, prefix: &mut Prefix, msg: &[u8], mut emit:
             kind @ (0x80 | 0x90) => {
                 let slot = if kind == 0x90 { Slot::NoteOn } else { Slot::NoteOff };
                 let x = decode(data2, prefix.take(ch));
-                let out = map_note(bank, slot, x);
+                let out = map_note(bank, slot, data1, x);
                 if let Some(ll) = out.ll {
                     emit(&[0xB0 | ch, CC_HIRES_VELOCITY, ll]);
                 }
@@ -164,15 +164,15 @@ mod tests {
         for code in 0..=V14_MAX {
             let (hh, ll) = ((code >> 7) as u8, (code & 0x7F) as u8);
             for slot in Slot::ALL {
-                let out = map_note(&bank, slot, decode(hh, Some(ll)));
+                let out = map_note(&bank, slot, 60, decode(hh, Some(ll)));
                 let expect = if slot == Slot::NoteOn && code < 128 { (1, 0) } else { (hh, ll) };
                 assert_eq!((out.vel, out.ll.unwrap()), expect, "код {code}, {slot:?}");
             }
         }
         bank.set_hi_res(false);
         for v in 0..=127u8 {
-            assert_eq!(map_note(&bank, Slot::NoteOn, decode(v, None)).vel, v.max(1));
-            assert_eq!(map_note(&bank, Slot::NoteOff, decode(v, None)), NoteOut { ll: None, vel: v });
+            assert_eq!(map_note(&bank, Slot::NoteOn, 21, decode(v, None)).vel, v.max(1));
+            assert_eq!(map_note(&bank, Slot::NoteOff, 108, decode(v, None)), NoteOut { ll: None, vel: v });
         }
     }
 
@@ -182,7 +182,7 @@ mod tests {
         let bank = CurveBank::new();
         bank.set_hi_res(true);
         for hh in 1..=127u8 {
-            assert_eq!(map_note(&bank, Slot::NoteOn, decode(hh, None)), NoteOut { ll: Some(hh), vel: hh });
+            assert_eq!(map_note(&bank, Slot::NoteOn, hh, decode(hh, None)), NoteOut { ll: Some(hh), vel: hh });
         }
     }
 
@@ -211,7 +211,7 @@ mod tests {
         for hi in [false, true] {
             bank.set_hi_res(hi);
             for v in 1..=127u8 {
-                assert!(map_note(&bank, Slot::NoteOn, decode(v, Some(5))).vel >= 1);
+                assert!(map_note(&bank, Slot::NoteOn, v, decode(v, Some(5))).vel >= 1);
             }
         }
     }

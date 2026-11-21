@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use nih_plug::prelude::NoteEvent;
-use vst_midi_curves::curve::{CurveBank, CurveShape, Slot};
+use vst_midi_curves::curve::{CurveBank, CurveShape, NoteMap, Slot};
 use vst_midi_curves::process_event;
 use vst_midi_curves::velocity::{process_midi, Prefix};
 
@@ -123,9 +123,19 @@ fn no_allocations_in_plugin_process_event() {
     assert!(last.is_some());
 }
 
-/// Поток-писатель непрерывно перезаливает таблицы двумя разными формами и
-/// дёргает формат выхода; поток-читатель гонит события. Выход всегда в
-/// допустимом диапазоне, Note On никогда не с velocity 0 (HH = 0), без паник.
+/// Карта нот: S-кривая в ноте 30, крутая — в 90, между ними морф.
+fn two_key_map() -> NoteMap {
+    let mut m = NoteMap::single(s_curve());
+    m.keys[0].note = 30;
+    let k = m.add_key(90);
+    m.keys[k].shape = m.fit_shape(steep());
+    m
+}
+
+/// Поток-писатель непрерывно перезаливает таблицы: формой на все ноты, картой
+/// нот по нотам и отдельными нотами — и дёргает формат выхода; поток-читатель
+/// гонит события по 88 нотам. Выход всегда в допустимом диапазоне, Note On
+/// никогда не с velocity 0 (HH = 0), без паник.
 #[test]
 fn writer_reader_stress() {
     let events: u32 = if cfg!(debug_assertions) { 1_000_000 } else { 10_000_000 };
@@ -135,10 +145,19 @@ fn writer_reader_stress() {
         let (bank, stop) = (bank.clone(), stop.clone());
         std::thread::spawn(move || {
             let shapes = [s_curve(), steep()];
+            let map = two_key_map();
             let mut n = 0usize;
             while !stop.load(Ordering::Relaxed) {
                 for slot in Slot::ALL {
-                    bank.store(slot, &shapes[n % 2]);
+                    match n % 3 {
+                        0 => bank.store(slot, &shapes[n % 2]),
+                        1 => bank.store_map(slot, &map, 0, 127),
+                        _ => {
+                            for note in (21..=108).step_by(7) {
+                                bank.store_note(slot, note, &shapes[(n + note as usize) % 2]);
+                            }
+                        }
+                    }
                 }
                 bank.set_hi_res(!n.is_multiple_of(3));
                 n += 1;
@@ -177,8 +196,9 @@ fn writer_reader_stress() {
 #[test]
 #[ignore]
 fn bench_ns_per_event() {
+    // Своя таблица у каждой ноты (карта с морфом): события по 88 нотам.
     let bank = CurveBank::new();
-    bank.store(Slot::NoteOn, &s_curve());
+    bank.store_map(Slot::NoteOn, &two_key_map(), 0, 127);
     bank.store(Slot::NoteOff, &steep());
     let mut prefix = Prefix::new();
     let n = 4_000_000u32;
