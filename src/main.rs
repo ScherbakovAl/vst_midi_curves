@@ -127,14 +127,7 @@ impl eframe::App for App {
             ui.separator();
         });
 
-        for slot in Slot::ALL {
-            if out.shape[slot.idx()] {
-                self.bank.store(slot, self.set.shape(slot));
-            }
-        }
-        if out.hi_res {
-            self.bank.set_hi_res(self.set.hi_res);
-        }
+        out.store(&self.set, &self.bank);
         let picked = pick_in.is_some() || pick_out.is_some();
         if let Some(p) = pick_in {
             self.settings.last_input_port = p;
@@ -188,7 +181,7 @@ fn spawn_port_watcher(ctx: egui::Context, midi: Arc<Mutex<midi::Midi>>) {
 
 fn main() -> Result<(), eframe::Error> {
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_inner_size([1000.0, 640.0]).with_title("MIDI Curves"),
+        viewport: egui::ViewportBuilder::default().with_inner_size([1000.0, 820.0]).with_title("MIDI Curves"),
         ..Default::default()
     };
     let app = App::new();

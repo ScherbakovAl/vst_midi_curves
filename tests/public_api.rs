@@ -3,7 +3,7 @@
 //! трогается), заливка кривых в банк, поток байтов MIDI через кривую.
 
 use vst_midi_curves::curve::{CurveBank, CurveSet, CurveShape, NoteMap, Slot};
-use vst_midi_curves::library::Library;
+use vst_midi_curves::library::{Library, Preset};
 use vst_midi_curves::settings::Settings;
 use vst_midi_curves::velocity::{process_midi, Prefix};
 
@@ -19,8 +19,9 @@ fn preset_to_settings_to_midi_bytes() {
     lib.save("Louder", &louder).unwrap();
     assert!(lib.scan().iter().any(|e| e.name == "Louder" && e.file));
 
-    // Настройки standalone: кривая из библиотеки, выход 14 бит.
-    let set = CurveSet { note_on: lib.load("Louder").unwrap(), hi_res: true, ..CurveSet::default() };
+    // Настройки standalone: кривая из библиотеки на все ноты, выход 14 бит.
+    let Ok(Preset::Shape(shape)) = lib.load("Louder") else { panic!("«Louder» — не форма") };
+    let set = CurveSet { note_on: NoteMap::single(shape), hi_res: true, ..CurveSet::default() };
     let path = dir.path().join("settings.json");
     let settings = Settings { curves: set, last_input_port: Some("kbd".into()), ..Settings::default() };
     settings.save(&path).unwrap();
@@ -42,6 +43,13 @@ fn preset_to_settings_to_midi_bytes() {
     assert!(out[1][2] > 64, "Note On середины не стал громче: {:?}", out[1]);
     assert_eq!(out[2..], [vec![0xB0, 88, 5], vec![0x80, 60, 30]]);
     assert_eq!(bank.last_x(Slot::NoteOff), Some((30.0 * 128.0 + 5.0) / 16383.0));
+
+    // Пресет «всё сразу» — те же настройки кривых: читается бит-в-бит и
+    // звучит так же.
+    lib.save_set("Setup", &loaded.curves).unwrap();
+    let Ok(Preset::Set(again)) = lib.load("Setup") else { panic!("«Setup» — не пресет «всё сразу»") };
+    assert_eq!(again, loaded.curves);
+    assert!(lib.scan().iter().any(|e| e.name == "Setup" && e.set));
 }
 
 /// Карта нот: тихая форма (y = x/2) в ноте 30, диагональ в 90 — одна и та же velocity

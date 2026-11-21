@@ -1,20 +1,23 @@
-//! Настройки standalone: порты, кривые, формат выхода, вкладка —
-//! `~/.config/vst_midi_curves/settings.json`.
+//! Настройки standalone: порты, карты нот обеих кривых, формат выхода,
+//! вкладка — `~/.config/vst_midi_curves/settings.json`.
 //!
 //! Чтение не паникует: битый файл — значения по умолчанию и сообщение.
-//! Старый формат (до 2026-11: `note_on_points`/`note_off_points` в единицах
-//! 0…127, `hi_res_enabled`) переводится точной миграцией; перед первой
-//! перезаписью старого файла рядом остаётся копия `settings.v1.json`.
+//! Старые форматы переводятся: 1 (до 2026-11: `note_on_points`/
+//! `note_off_points` в единицах 0…127, `hi_res_enabled`) — точной миграцией
+//! формы, 2 (одна форма на кривую) — картой из одной ключевой ноты. Перед
+//! первой перезаписью старого файла рядом остаётся его копия
+//! `settings.v<версия>.json` (старая программа новый формат не читает).
 
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
 use crate::curve::legacy::{shape_from_legacy, LegacyPoint};
-use crate::curve::CurveSet;
+use crate::curve::{CurveSet, NoteMap};
 
-/// Версия формата файла настроек (1 — старый формат без поля `version`).
-pub const SETTINGS_VERSION: u32 = 2;
+/// Версия формата файла настроек (1 — старый формат без поля `version`,
+/// 2 — одна форма на кривую, 3 — карты нот).
+pub const SETTINGS_VERSION: u32 = 3;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -48,6 +51,15 @@ impl Default for Settings {
     }
 }
 
+/// Версия формата в тексте файла (нет поля — 1).
+fn file_version(text: &str) -> u32 {
+    #[derive(Deserialize)]
+    struct V {
+        version: Option<u32>,
+    }
+    serde_json::from_str::<V>(text).ok().and_then(|v| v.version).unwrap_or(1)
+}
+
 /// Путь по умолчанию; `None` — у системы нет папки настроек.
 pub fn default_path() -> Option<PathBuf> {
     dirs::config_dir().map(|d| d.join("vst_midi_curves").join("settings.json"))
@@ -59,10 +71,10 @@ impl Settings {
         let mut s: Settings = serde_json::from_str(text).map_err(|e| e.to_string())?;
         let old: LegacyFields = serde_json::from_str(text).map_err(|e| e.to_string())?;
         if let Some(p) = old.note_on_points {
-            s.curves.note_on = shape_from_legacy(&p);
+            s.curves.note_on = NoteMap::single(shape_from_legacy(&p));
         }
         if let Some(p) = old.note_off_points {
-            s.curves.note_off = shape_from_legacy(&p);
+            s.curves.note_off = NoteMap::single(shape_from_legacy(&p));
         }
         if let Some(h) = old.hi_res_enabled {
             s.curves.hi_res = h;
@@ -83,9 +95,10 @@ impl Settings {
         };
         match Self::parse(&text) {
             Ok(s) => {
-                if !text.contains("\"version\"") {
+                let v = file_version(&text);
+                if v < SETTINGS_VERSION {
                     // Старый формат: копия до первой перезаписи.
-                    let backup = path.with_file_name("settings.v1.json");
+                    let backup = path.with_file_name(format!("settings.v{v}.json"));
                     if !backup.exists() {
                         let _ = std::fs::copy(path, backup);
                     }
@@ -124,13 +137,32 @@ mod tests {
         let on: Vec<LegacyPoint> = serde_json::from_value(old["note_on_points"].clone()).unwrap();
         for j in 0..=127 * 4 {
             let x = j as f32 / 4.0;
-            let d = (s.curves.note_on.eval(x / 127.0) * 127.0 - legacy_eval(&on, x)).abs();
+            let d = (s.curves.note_on.shape_at(60).eval(x / 127.0) * 127.0 - legacy_eval(&on, x)).abs();
             assert!(d < 0.01, "x={x}: {d}");
         }
         // В новом формате старых полей нет, и он читается обратно как есть.
         let json = serde_json::to_string(&s).unwrap();
         assert!(!json.contains("note_on_points") && !json.contains("hi_res_enabled"));
         assert_eq!(Settings::parse(&json).unwrap(), s);
+    }
+
+    /// Формат 2 (настройки пользователя на 2026-11-21): форма каждой кривой
+    /// становится картой из одной ключевой — бит-в-бит та же форма.
+    #[test]
+    fn settings_v2_migrate_to_single_key_maps() {
+        let text = include_str!("../tests/fixtures/v2/settings.json");
+        let s = Settings::parse(text).unwrap();
+        assert_eq!(s.version, SETTINGS_VERSION);
+        assert!(s.curves.hi_res);
+        let old: serde_json::Value = serde_json::from_str(text).unwrap();
+        for (map, key) in [(&s.curves.note_on, "note_on"), (&s.curves.note_off, "note_off")] {
+            let shape: crate::curve::CurveShape = serde_json::from_value(old["curves"][key].clone()).unwrap();
+            assert_eq!(map, &NoteMap::single(shape));
+        }
+        assert_eq!(s.last_output_port, old["last_output_port"].as_str().map(String::from));
+        let json = serde_json::to_string(&s).unwrap();
+        assert_eq!(Settings::parse(&json).unwrap(), s);
+        assert_eq!((file_version(text), file_version(&json), file_version("{}")), (2, 3, 1));
     }
 
     #[test]
@@ -155,6 +187,15 @@ mod tests {
         assert!(path.with_file_name("settings.v1.json").exists());
         s.save(&path).unwrap();
         assert_eq!(Settings::load(&path).0, s);
+        // Формат 2 — своя копия, новый формат копий не делает.
+        std::fs::write(&path, include_str!("../tests/fixtures/v2/settings.json")).unwrap();
+        let (s2, err) = Settings::load(&path);
+        assert!(err.is_none());
+        assert!(path.with_file_name("settings.v2.json").exists());
+        s2.save(&path).unwrap();
+        std::fs::remove_file(path.with_file_name("settings.v2.json")).unwrap();
+        Settings::load(&path);
+        assert!(!path.with_file_name("settings.v3.json").exists());
         std::fs::write(&path, "garbage").unwrap();
         let (d, err) = Settings::load(&path);
         assert_eq!(d, Settings::default());

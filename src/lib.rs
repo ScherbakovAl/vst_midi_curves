@@ -37,7 +37,8 @@ use crate::velocity::{decode, map_note, Prefix, CC_HIRES_VELOCITY};
 pub struct MidiCurvesParams {
     #[persist = "editor-state"]
     editor_state: Arc<EguiState>,
-    /// Обе кривые и формат выхода.
+    /// Карты нот обеих кривых и формат выхода. Ключ тот же, что у формата
+    /// с одной формой на кривую: старые проекты читаются (`NoteMap`).
     #[persist = "curves"]
     curves: Arc<RwLock<CurveSet>>,
     /// Открытая вкладка редактора (0 — Note On, 1 — Note Off).
@@ -48,7 +49,8 @@ pub struct MidiCurvesParams {
 impl Default for MidiCurvesParams {
     fn default() -> Self {
         Self {
-            editor_state: EguiState::from_size(960, 640),
+            // Старые проекты хранят свой размер окна (поле "editor-state").
+            editor_state: EguiState::from_size(1000, 800),
             curves: Arc::new(RwLock::new(CurveSet::default())),
             tab: Arc::new(AtomicU8::new(0)),
         }
@@ -225,15 +227,8 @@ impl Plugin for MidiCurvesPlugin {
                 }
 
                 let out = st.ui.show(ctx, &mut st.set, &bank, |_| {});
-                for slot in Slot::ALL {
-                    if out.shape[slot.idx()] {
-                        bank.store(slot, st.set.shape(slot));
-                    }
-                }
-                if out.hi_res {
-                    bank.set_hi_res(st.set.hi_res);
-                }
-                if out.shape.iter().any(|&c| c) || out.hi_res {
+                out.store(&st.set, &bank);
+                if out.changed() || out.hi_res {
                     *params.curves.write().unwrap_or_else(|e| e.into_inner()) = st.set.clone();
                 }
                 if out.tab {
