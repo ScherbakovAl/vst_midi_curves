@@ -25,6 +25,6 @@ keywords:
   - digital piano
   - Rust
 license: MIT
-version: "0.1.0"
+version: "0.2.0"
 date-released: "2026-11-21"
 doi: 10.5281/zenodo.24408082

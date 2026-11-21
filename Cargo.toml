@@ -1,6 +1,6 @@
 [package]
 name = "vst_midi_curves"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 authors = ["Scherbakov Alexey <scherbakov.al@gmail.com>"]
 description = "MIDI velocity curves (Note On / Note Off, 14-bit CC88): VST3/CLAP plugin and standalone app"
