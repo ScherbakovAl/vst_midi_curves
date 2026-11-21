@@ -240,6 +240,29 @@ impl CurveShape {
         }
     }
 
+    /// Симметричная ручка (ЛКМ-драг ручки): противоположная ручка — точное зеркало
+    /// через узел (та же длина, C1 в узле), узел становится гладким. Ход ручки
+    /// по x ужат в ширину УЖЕГО из двух сегментов — иначе `h_in`/`h_out`
+    /// ужали бы одну сторону и симметрия пропала бы. У крайнего узла второй
+    /// ручки нет — обычная `set_handle`.
+    pub fn set_handle_sym(&mut self, i: usize, out: bool, pos: P2) {
+        let n = self.knots.len();
+        if i == 0 || i + 1 == n {
+            self.set_handle(i, out, pos, false);
+            return;
+        }
+        let w = (self.knots[i + 1].x - self.knots[i].x).min(self.knots[i].x - self.knots[i - 1].x);
+        let k = &mut self.knots[i];
+        let sign = if out { 1.0 } else { -1.0 };
+        let v = fit_handle(sub2(pos, [k.x, k.y]), w, sign);
+        k.smooth = true;
+        if out {
+            (k.hout, k.hin) = (v, [-v[0], -v[1]]);
+        } else {
+            (k.hin, k.hout) = (v, [-v[0], -v[1]]);
+        }
+    }
+
     /// Переключить гладкость узла. Ставший гладким узел выравнивает входящую
     /// ручку по исходящей (длины сохраняются).
     pub fn toggle_smooth(&mut self, i: usize) {
@@ -279,6 +302,20 @@ mod tests {
             let y1 = c.eval(j as f32 / 50.0);
             assert!((y1 - y0).abs() < 1e-4, "j={j}: {y0} → {y1}");
         }
+    }
+
+    #[test]
+    fn sym_handle_mirrors_effective_handles() {
+        // Узел на 0.3: сегменты 0.3 и 0.7; ручку тянут далеко вправо — обе
+        // действующие ручки равны и противоположны, узел гладкий.
+        let mut c = CurveShape::linear();
+        let i = c.insert_at(0.3).unwrap();
+        c.knots[i].smooth = false;
+        c.set_handle_sym(i, true, [0.3 + 0.6, 0.3 + 0.2]);
+        let (ho, hi) = (c.h_out(i), c.h_in(i));
+        assert!(c.knots[i].smooth);
+        assert!((ho[0] + hi[0]).abs() < 1e-6 && (ho[1] + hi[1]).abs() < 1e-6, "{ho:?} {hi:?}");
+        assert!((ho[0] - 0.3).abs() < 1e-6, "ход ужат в узкий сегмент: {ho:?}");
     }
 
     #[test]

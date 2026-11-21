@@ -2,8 +2,9 @@
 //! отрисовка — из редактора piano_sim (`src/gui/vel_curve_editor.rs`).
 //!
 //! Мышь на графике: ЛКМ по кривой — новый узел (форма не меняется), драг узла
-//! или ручки — изгиб, ПКМ или двойной клик по узлу — удалить его, Delete —
-//! удалить выбранный. Shift — точный ход (×0.1), Ctrl — привязка к сетке 1/16,
+//! или ручки — изгиб (ручка — симметрично: вторая зеркально через узел),
+//! ПКМ-драг ручки — ручки по отдельности, ПКМ или двойной клик по узлу —
+//! удалить его, Delete — удалить выбранный. Shift — точный ход (×0.1), Ctrl — привязка к сетке 1/16,
 //! Alt+драг ручки — сломать узел в угол, Alt+клик по узлу — гладкий ↔ угол.
 //! Ctrl+Z / Ctrl+Shift+Z (Ctrl+Y) — отмена / повтор, история у каждой кривой
 //! своя; снимок формы — на отпускании мыши.
@@ -60,6 +61,8 @@ struct CurveView {
     /// Позиция захваченного объекта БЕЗ клампа: шаг мыши копится сюда, чтобы
     /// упор в край или соседний узел не «прилипал» при обратном ходе.
     grab_pos: [f32; 2],
+    /// Текущий драг ручки — симметричный (ЛКМ; ПКМ — ручки по отдельности).
+    sym: bool,
     /// Ломаная в единичном квадрате и форма, по которой она посчитана.
     poly: Vec<[f32; 2]>,
     poly_of: Option<CurveShape>,
@@ -403,7 +406,8 @@ impl CurvesUi {
     }
 }
 
-const HELP: &str = "Click on the curve — add a knot. Drag a knot or handle. \
+const HELP: &str = "Click on the curve — add a knot. Drag a knot or handle \
+(handle — symmetric, mirrored through the knot); right-drag a handle — handles independently. \
 Right/double click a knot — delete; Del — delete selected. \
 Shift — fine (×0.1), Ctrl — snap to 1/16, Alt+drag handle — corner, \
 Alt+click knot — smooth ↔ corner. Ctrl+Z / Ctrl+Shift+Z — undo / redo. \
@@ -555,8 +559,20 @@ fn curve_editor(
             }
         }
     }
+    // ПКМ-драг ручки выбранного узла — ручки по отдельности (не симметрично).
+    if resp.drag_started_by(egui::PointerButton::Secondary) {
+        let origin = ui.input(|i| i.pointer.press_origin());
+        st.grab = origin
+            .and_then(|p| hit(shape, st.sel, p))
+            .filter(|g| matches!(g, Grab::In(_) | Grab::Out(_)));
+        st.sym = false;
+        if let Some(g) = st.grab {
+            st.grab_pos = grab_target_pos(shape, g);
+        }
+    }
     // Драг: захват по точке НАЖАТИЯ (drag_started приходит после порога).
     if resp.drag_started_by(egui::PointerButton::Primary) {
+        st.sym = true;
         let origin = ui.input(|i| i.pointer.press_origin());
         st.grab = origin.and_then(|p| match hit(shape, st.sel, p) {
             Some(g) => Some(g),
@@ -573,7 +589,9 @@ fn curve_editor(
             }
         }
     }
-    if let (true, Some(g)) = (resp.dragged_by(egui::PointerButton::Primary), st.grab) {
+    let dragging =
+        resp.dragged_by(egui::PointerButton::Primary) || resp.dragged_by(egui::PointerButton::Secondary);
+    if let (true, Some(g)) = (dragging, st.grab) {
         let d = resp.drag_delta();
         let k = if mods.shift { 0.1 } else { 1.0 };
         st.grab_pos[0] += d.x / pr.width() * k;
@@ -586,6 +604,9 @@ fn curve_editor(
             let before = shape.clone();
             match g {
                 Grab::Knot(i) => shape.move_knot(i, p[0], p[1]),
+                // Alt ломает узел в угол — симметрии там нет.
+                Grab::Out(i) if st.sym && !mods.alt => shape.set_handle_sym(i, true, p),
+                Grab::In(i) if st.sym && !mods.alt => shape.set_handle_sym(i, false, p),
                 Grab::Out(i) => shape.set_handle(i, true, p, mods.alt),
                 Grab::In(i) => shape.set_handle(i, false, p, mods.alt),
             }
@@ -812,13 +833,17 @@ mod tests {
         }
 
         fn drag(&mut self, from: Pos2, to: Pos2) -> Outcome {
+            self.drag_by(from, to, egui::PointerButton::Primary)
+        }
+
+        fn drag_by(&mut self, from: Pos2, to: Pos2, button: egui::PointerButton) -> Outcome {
             let mut acc = self.frame(vec![egui::Event::PointerMoved(from)], egui::Modifiers::NONE);
-            acc = merge(acc, self.button(from, egui::PointerButton::Primary, true));
+            acc = merge(acc, self.button(from, button, true));
             for j in 1..=10 {
                 let p = from + (to - from) * (j as f32 / 10.0);
                 acc = merge(acc, self.frame(vec![egui::Event::PointerMoved(p)], egui::Modifiers::NONE));
             }
-            acc = merge(acc, self.button(to, egui::PointerButton::Primary, false));
+            acc = merge(acc, self.button(to, button, false));
             merge(acc, self.frame(vec![], egui::Modifiers::NONE))
         }
 
@@ -870,6 +895,31 @@ mod tests {
         assert_eq!(h.set.note_on.knots.len(), 2);
         h.click(h.at([0.0, 0.0]), egui::PointerButton::Secondary);
         assert_eq!(h.set.note_on.knots.len(), 2);
+    }
+
+    #[test]
+    fn handle_drag_lmb_symmetric_rmb_independent() {
+        let mut h = Harness::new();
+        h.click(h.at([0.5, 0.5]), egui::PointerButton::Primary);
+        let tip = |s: &CurveShape| {
+            let (k, v) = (s.pt(1), s.h_out(1));
+            [k[0] + v[0], k[1] + v[1]]
+        };
+        let len = |v: [f32; 2]| v[0].hypot(v[1]);
+        // ПКМ: исходящая ручка длиннее, входящая — та же длина, на одной прямой.
+        let len_in = len(h.set.note_on.h_in(1));
+        let out = h.drag_by(h.at(tip(&h.set.note_on)), h.at([0.75, 0.6]), egui::PointerButton::Secondary);
+        assert!(out.shape[0] && out.committed);
+        assert_eq!(h.set.note_on.knots.len(), 3, "ПКМ-драг ручки удалил узел");
+        let (ho, hi) = (h.set.note_on.h_out(1), h.set.note_on.h_in(1));
+        assert!((len(ho) - len_in).abs() > 0.03, "исходящая не сдвинулась: {ho:?}");
+        assert!((len(hi) - len_in).abs() < 1e-4, "ПКМ изменил длину входящей: {hi:?}");
+        assert!((ho[0] * hi[1] - ho[1] * hi[0]).abs() < 1e-4, "ручки не на одной прямой");
+        // ЛКМ: входящая — точное зеркало исходящей.
+        h.drag(h.at(tip(&h.set.note_on)), h.at([0.7, 0.75]));
+        let (ho, hi) = (h.set.note_on.h_out(1), h.set.note_on.h_in(1));
+        assert!((ho[0] - 0.2).abs() < 0.02 && (ho[1] - 0.25).abs() < 0.02, "исходящая {ho:?}");
+        assert!((ho[0] + hi[0]).abs() < 1e-6 && (ho[1] + hi[1]).abs() < 1e-6, "{ho:?} {hi:?}");
     }
 
     #[test]

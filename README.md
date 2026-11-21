@@ -46,7 +46,8 @@ Video demo (older version): [YouTube](https://www.youtube.com/watch?v=CtjtueLHJK
 | Action | Gesture |
 |---|---|
 | add a knot (shape unchanged) | click on the curve |
-| move a knot / handle | drag (Shift — fine ×0.1, Ctrl — snap to 1/16) |
+| move a knot / handle | drag (Shift — fine ×0.1, Ctrl — snap to 1/16); a handle moves symmetrically — the opposite one is mirrored through the knot |
+| move a handle independently | right-drag a handle (the opposite one keeps its length) |
 | delete a knot | right click or double click; Del — selected knot |
 | corner knot | Alt+drag a handle; Alt+click a knot toggles smooth ↔ corner |
 | undo / redo | Ctrl+Z / Ctrl+Shift+Z (or the buttons) |
