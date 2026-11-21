@@ -47,21 +47,21 @@ impl Default for CurveShape {
 
 pub type P2 = [f32; 2];
 
-fn lerp2(a: P2, b: P2, t: f32) -> P2 {
+pub(crate) fn lerp2(a: P2, b: P2, t: f32) -> P2 {
     [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]
 }
 
-fn add2(a: P2, b: P2) -> P2 {
+pub(crate) fn add2(a: P2, b: P2) -> P2 {
     [a[0] + b[0], a[1] + b[1]]
 }
 
-fn sub2(a: P2, b: P2) -> P2 {
+pub(crate) fn sub2(a: P2, b: P2) -> P2 {
     [a[0] - b[0], a[1] - b[1]]
 }
 
 /// Ужать ручку по x в [0, w] (знак x — по стороне: `sign` = +1 исходящая,
 /// −1 входящая), сохраняя направление: вектор масштабируется целиком.
-fn fit_handle(h: P2, w: f32, sign: f32) -> P2 {
+pub(crate) fn fit_handle(h: P2, w: f32, sign: f32) -> P2 {
     let hx = (h[0] * sign).max(0.0);
     let h = [hx * sign, h[1]];
     if hx > w {
@@ -152,7 +152,7 @@ impl CurveShape {
     }
 
     /// Сегмент, на котором лежит x, и параметр t точки кривой с этим x.
-    fn locate(&self, x: f32) -> (usize, f32) {
+    pub fn locate(&self, x: f32) -> (usize, f32) {
         let x = x.clamp(0.0, 1.0);
         let n = self.knots.len();
         let i = self.knots[1..n - 1].iter().take_while(|k| k.x <= x).count();
@@ -214,6 +214,20 @@ impl CurveShape {
             return;
         }
         self.knots.sort_by(|a, b| a.x.total_cmp(&b.x));
+        self.clamp_knots();
+    }
+
+    /// Порядок узлов (без сортировки) и y в [0, 1] — см. [`Self::clamp_x`].
+    fn clamp_knots(&mut self) {
+        self.clamp_x();
+        for k in &mut self.knots {
+            k.y = k.y.clamp(0.0, 1.0);
+        }
+    }
+
+    /// Порядок узлов по x (без сортировки): крайние на 0 и 1, внутренние —
+    /// x_i ∈ [x_{i−1} + KNOT_GAP, 1 − KNOT_GAP·(n−1−i)].
+    pub(crate) fn clamp_x(&mut self) {
         let n = self.knots.len();
         self.knots[0].x = 0.0;
         self.knots[n - 1].x = 1.0;
@@ -222,9 +236,6 @@ impl CurveShape {
             let hi = 1.0 - KNOT_GAP * (n - 1 - i) as f32;
             self.knots[i].x = self.knots[i].x.clamp(lo, hi.max(lo));
         }
-        for k in &mut self.knots {
-            k.y = k.y.clamp(0.0, 1.0);
-        }
     }
 
     /// Вставить узел в точку кривой с абсциссой `x`, НЕ меняя форму
@@ -232,21 +243,36 @@ impl CurveShape {
     /// вплотную к существующему узлу.
     pub fn insert_at(&mut self, x: f32) -> Option<usize> {
         let (i, t) = self.locate(x);
+        self.split(i, t)
+    }
+
+    /// Вставить узел в сегмент `i` в точке с параметром `t`, НЕ меняя форму
+    /// (де Кастельжо). `None` — новый узел ближе `KNOT_GAP` к соседнему.
+    pub fn split(&mut self, i: usize, t: f32) -> Option<usize> {
+        if i + 1 >= self.knots.len() {
+            return None;
+        }
+        let m = bez(&self.seg(i), t);
+        let gap_ok = m[0] - self.knots[i].x >= KNOT_GAP && self.knots[i + 1].x - m[0] >= KNOT_GAP;
+        gap_ok.then(|| self.split_forced(i, t))
+    }
+
+    /// То же без проверки зазора: узел вставляется всегда, слишком близкий
+    /// сдвигается на `KNOT_GAP` (форма почти не меняется). Для вставки узла
+    /// сразу во все ключевые ноты карты.
+    pub(crate) fn split_forced(&mut self, i: usize, t: f32) -> usize {
         let p = self.seg(i);
         let (p01, p12, p23) = (lerp2(p[0], p[1], t), lerp2(p[1], p[2], t), lerp2(p[2], p[3], t));
         let (p012, p123) = (lerp2(p01, p12, t), lerp2(p12, p23, t));
         let m = lerp2(p012, p123, t);
-        let gap_ok = m[0] - self.knots[i].x >= KNOT_GAP && self.knots[i + 1].x - m[0] >= KNOT_GAP;
-        if !gap_ok {
-            return None;
-        }
         self.knots[i].hout = sub2(p01, p[0]);
         self.knots[i + 1].hin = sub2(p23, p[3]);
         self.knots.insert(
             i + 1,
             Knot { x: m[0], y: m[1], hin: sub2(p012, m), hout: sub2(p123, m), smooth: true },
         );
-        Some(i + 1)
+        self.clamp_x();
+        i + 1
     }
 
     /// Удалить внутренний узел (крайние неудаляемы).

@@ -1,14 +1,16 @@
-//! Кривые velocity: форма ([`shape`]), таблицы потока MIDI ([`bank`]),
-//! миграция старого формата ([`legacy`]).
+//! Кривые velocity: форма ([`shape`]), карта нот с морфингом ([`notemap`]),
+//! таблицы потока MIDI ([`bank`]), миграция старого формата ([`legacy`]).
 //!
 //! Copyright (c) 2025 Scherbakov Alexey <scherbakov.al@gmail.com>
 //! Licensed under the MIT License
 
 pub mod bank;
 pub mod legacy;
+pub mod notemap;
 pub mod shape;
 
 pub use bank::{CurveBank, Slot, LUT_N};
+pub use notemap::{Axis, KeyCurve, NoteMap};
 pub use shape::{CurveShape, Knot};
 
 /// Обе кривые и формат выхода — то, что хранится в проекте DAW (плагин) и в
